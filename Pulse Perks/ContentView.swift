@@ -26,6 +26,7 @@ struct ContentView: View {
     private let basePoints = 2450
     private let pointsPerRedemption = 75
     private let nextRewardPoints = 3000
+    private let dailySurveyGoal = 300
     private let collections = PerkCollection.sampleData
     private let surveys = Survey.sampleData
 
@@ -163,6 +164,10 @@ struct ContentView: View {
         completedSurveys.reduce(0) { total, survey in
             total + survey.points
         }
+    }
+
+    private var dailySurveyGoalProgress: Double {
+        min(Double(surveyPoints) / Double(dailySurveyGoal), 1)
     }
 
     private var memberPoints: Int {
@@ -500,6 +505,13 @@ struct ContentView: View {
 
             Text("Share product feedback, earn points, and use them toward member rewards.")
                 .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            ProgressView(value: dailySurveyGoalProgress)
+                .tint(Color(red: 0.1, green: 0.55, blue: 0.42))
+
+            Text("\(min(surveyPoints, dailySurveyGoal)) of \(dailySurveyGoal) daily survey points")
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
@@ -956,6 +968,7 @@ private struct SurveyRow: View {
                 HStack(spacing: 10) {
                     Label(survey.estimatedTime, systemImage: "clock")
                     Label(survey.audience, systemImage: "person.2")
+                    Label("\(survey.matchScore)% match", systemImage: "scope")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1010,8 +1023,42 @@ private struct SurveyDetailView: View {
                     HStack(spacing: 12) {
                         StatBadge(value: "+\(survey.points)", label: "Points")
                         StatBadge(value: survey.estimatedTime, label: "Time")
-                        StatBadge(value: "\(survey.questions.count)", label: "Questions")
+                        StatBadge(value: "\(survey.matchScore)%", label: "Match")
                     }
+
+                    DetailRow(iconName: "questionmark.circle", title: "Question count", value: "\(survey.questions.count) questions")
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.black.opacity(0.06))
+                        )
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("Profile fit", systemImage: "scope")
+                                .font(.headline)
+
+                            Spacer()
+
+                            Text("\(survey.matchScore)%")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ProgressView(value: Double(survey.matchScore), total: 100)
+                            .tint(survey.tint)
+
+                        Text(survey.matchReason)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(16)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.black.opacity(0.06))
+                    )
 
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Preview")
@@ -1597,6 +1644,8 @@ private struct Survey: Identifiable {
     let estimatedTime: String
     let audience: String
     let points: Int
+    let matchScore: Int
+    let matchReason: String
     let questions: [String]
     let iconName: String
     let tint: Color
@@ -1609,6 +1658,8 @@ private struct Survey: Identifiable {
             estimatedTime: "6 min",
             audience: "Entertainment",
             points: 120,
+            matchScore: 92,
+            matchReason: "Matched because you saved travel and lifestyle offers and have weekly digest enabled.",
             questions: [
                 "Which streaming services do you currently use?",
                 "How do you decide what to watch next?",
@@ -1624,6 +1675,8 @@ private struct Survey: Identifiable {
             estimatedTime: "4 min",
             audience: "Shopping",
             points: 80,
+            matchScore: 86,
+            matchReason: "Matched because retail and food rewards are active in your marketplace.",
             questions: [
                 "Where do you buy groceries most often?",
                 "Which deal types change what you buy?",
@@ -1639,6 +1692,8 @@ private struct Survey: Identifiable {
             estimatedTime: "8 min",
             audience: "Wellness",
             points: 150,
+            matchScore: 94,
+            matchReason: "Matched because wellness rewards and nearby offers are enabled for your profile.",
             questions: [
                 "What fitness goals are you focused on this month?",
                 "Which wellness perks would you redeem fastest?",
