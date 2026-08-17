@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var selectedCategory = "All"
+    @State private var selectedSort = PerkSort.bestValue
     @State private var searchText = ""
     @State private var selectedPerk: Perk?
     @State private var isShowingNotifications = false
@@ -67,6 +68,7 @@ struct ContentView: View {
                     forYouPerks
                     searchField
                     categoryPicker
+                    sortPicker
                     featuredPerks
                 }
                 .padding(20)
@@ -81,15 +83,19 @@ struct ContentView: View {
             ? perks
             : perks.filter { $0.category == selectedCategory }
 
+        let searchMatches: [Perk]
+
         if searchText.isEmpty {
-            return categoryMatches
+            searchMatches = categoryMatches
+        } else {
+            searchMatches = categoryMatches.filter { perk in
+                perk.title.localizedStandardContains(searchText)
+                    || perk.description.localizedStandardContains(searchText)
+                    || perk.partner.localizedStandardContains(searchText)
+            }
         }
 
-        return categoryMatches.filter { perk in
-            perk.title.localizedStandardContains(searchText)
-                || perk.description.localizedStandardContains(searchText)
-                || perk.partner.localizedStandardContains(searchText)
-        }
+        return searchMatches.sorted(using: selectedSort)
     }
 
     private var redeemedPerks: [Perk] {
@@ -318,6 +324,16 @@ struct ContentView: View {
         }
     }
 
+    private var sortPicker: some View {
+        Picker("Sort perks", selection: $selectedSort) {
+            ForEach(PerkSort.allCases) { sort in
+                Label(sort.title, systemImage: sort.iconName)
+                    .tag(sort)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
     private var forYouPerks: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -351,7 +367,7 @@ struct ContentView: View {
 
     private var featuredPerks: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("All perks")
+            Text(selectedSort.sectionTitle)
                 .font(.title2.weight(.bold))
 
             LazyVStack(spacing: 12) {
@@ -964,6 +980,68 @@ private struct PulseNotification: Identifiable {
     let iconName: String
 }
 
+private enum PerkSort: String, CaseIterable, Identifiable {
+    case bestValue
+    case nearest
+    case endingSoon
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .bestValue:
+            "Value"
+        case .nearest:
+            "Nearby"
+        case .endingSoon:
+            "Expiring"
+        }
+    }
+
+    var sectionTitle: String {
+        switch self {
+        case .bestValue:
+            "Best value"
+        case .nearest:
+            "Nearest perks"
+        case .endingSoon:
+            "Ending soon"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .bestValue:
+            "dollarsign.circle"
+        case .nearest:
+            "location"
+        case .endingSoon:
+            "clock"
+        }
+    }
+
+    func compare(_ lhs: Perk, _ rhs: Perk) -> Bool {
+        switch self {
+        case .bestValue:
+            lhs.estimatedSavings > rhs.estimatedSavings
+        case .nearest:
+            lhs.distanceInMiles < rhs.distanceInMiles
+        case .endingSoon:
+            lhs.daysUntilExpiration < rhs.daysUntilExpiration
+        }
+    }
+}
+
+private extension Array where Element == Perk {
+    func sorted(using sort: PerkSort) -> [Perk] {
+        sorted { lhs, rhs in
+            sort.compare(lhs, rhs)
+        }
+    }
+}
+
 private struct Perk: Identifiable {
     let id: String
     let title: String
@@ -972,6 +1050,8 @@ private struct Perk: Identifiable {
     let category: String
     let expiration: String
     let distance: String
+    let distanceInMiles: Double
+    let daysUntilExpiration: Int
     let shortDetail: String
     let redemptionInstructions: String
     let estimatedSavings: Int
@@ -988,6 +1068,8 @@ private struct Perk: Identifiable {
             category: "Food",
             expiration: "Expires Friday",
             distance: "0.4 mi",
+            distanceInMiles: 0.4,
+            daysUntilExpiration: 5,
             shortDetail: "Lunch near the office",
             redemptionInstructions: "Show your member code at checkout or apply the offer in the partner app.",
             estimatedSavings: 12,
@@ -1003,6 +1085,8 @@ private struct Perk: Identifiable {
             category: "Fitness",
             expiration: "6 days left",
             distance: "1.2 mi",
+            distanceInMiles: 1.2,
+            daysUntilExpiration: 6,
             shortDetail: "Bonus credits for classes",
             redemptionInstructions: "Tap redeem, then create or connect your ClassPass account before booking.",
             estimatedSavings: 39,
@@ -1018,6 +1102,8 @@ private struct Perk: Identifiable {
             category: "Travel",
             expiration: "Ends Aug 31",
             distance: "Online",
+            distanceInMiles: 99,
+            daysUntilExpiration: 14,
             shortDetail: "Last-minute trip savings",
             redemptionInstructions: "Use the generated promo code before confirming an eligible hotel stay.",
             estimatedSavings: 48,
@@ -1033,6 +1119,8 @@ private struct Perk: Identifiable {
             category: "Retail",
             expiration: "New today",
             distance: "Online",
+            distanceInMiles: 99,
+            daysUntilExpiration: 21,
             shortDetail: "Workwear and basics",
             redemptionInstructions: "Open the partner offer and apply the member discount at checkout.",
             estimatedSavings: 25,
