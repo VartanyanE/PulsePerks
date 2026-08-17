@@ -426,6 +426,14 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    MembershipCard(
+                        memberName: "Emanuil",
+                        tier: "Pulse Plus",
+                        memberCode: "PULSE-2450",
+                        points: memberPoints,
+                        savedValue: savedValue
+                    )
+
                     walletSummary
 
                     walletSection(
@@ -620,6 +628,88 @@ private struct StatBadge: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct MembershipCard: View {
+    let memberName: String
+    let tier: String
+    let memberCode: String
+    let points: Int
+    let savedValue: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(tier)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color(red: 0.1, green: 0.55, blue: 0.42))
+
+                    Text(memberName)
+                        .font(.largeTitle.weight(.bold))
+                        .foregroundStyle(.primary)
+                }
+
+                Spacer()
+
+                Image(systemName: "waveform.path.ecg")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(Color(red: 0.1, green: 0.55, blue: 0.42))
+            }
+
+            BarcodeView(code: memberCode)
+
+            HStack(spacing: 12) {
+                StatBadge(value: points.formatted(), label: "Points")
+                StatBadge(value: "$\(savedValue)", label: "Saved")
+            }
+
+            Text(memberCode)
+                .font(.system(.callout, design: .monospaced).weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(20)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.96, green: 0.99, blue: 0.97),
+                    Color(red: 0.92, green: 0.96, blue: 1.0)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.black.opacity(0.08))
+        )
+    }
+}
+
+private struct BarcodeView: View {
+    let code: String
+
+    private var bars: [CGFloat] {
+        code.unicodeScalars.enumerated().map { index, scalar in
+            CGFloat((Int(scalar.value) + index) % 4 + 1)
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 3) {
+            ForEach(Array(bars.enumerated()), id: \.offset) { _, width in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.primary)
+                    .frame(width: width, height: 58)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityLabel("Member barcode")
     }
 }
 
