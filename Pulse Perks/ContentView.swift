@@ -24,6 +24,7 @@ struct ContentView: View {
     private let basePoints = 2450
     private let pointsPerRedemption = 75
     private let nextRewardPoints = 3000
+    private let collections = PerkCollection.sampleData
 
     var body: some View {
         TabView {
@@ -66,6 +67,7 @@ struct ContentView: View {
                     header
                     rewardsProgress
                     forYouPerks
+                    collectionsSection
                     searchField
                     categoryPicker
                     sortPicker
@@ -191,6 +193,12 @@ struct ContentView: View {
     private func resetDemoActivity() {
         savedPerkIDsValue = ""
         redeemedPerkIDsValue = ""
+    }
+
+    private func applyCollection(_ collection: PerkCollection) {
+        selectedCategory = collection.category
+        selectedSort = collection.sort
+        searchText = collection.searchText
     }
 
     private var header: some View {
@@ -360,6 +368,24 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                }
+            }
+        }
+    }
+
+    private var collectionsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Collections")
+                .font(.title2.weight(.bold))
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                ForEach(collections) { collection in
+                    Button {
+                        applyCollection(collection)
+                    } label: {
+                        PerkCollectionCard(collection: collection)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -643,6 +669,40 @@ private struct RecommendedPerkCard: View {
         }
         .frame(width: 210, alignment: .leading)
         .padding(16)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.black.opacity(0.06))
+        )
+    }
+}
+
+private struct PerkCollectionCard: View {
+    let collection: PerkCollection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: collection.iconName)
+                .font(.headline)
+                .foregroundStyle(collection.tint)
+                .frame(width: 38, height: 38)
+                .background(collection.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(collection.title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+
+                Text(collection.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 118, alignment: .topLeading)
+        .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
@@ -1040,6 +1100,60 @@ private extension Array where Element == Perk {
             sort.compare(lhs, rhs)
         }
     }
+}
+
+private struct PerkCollection: Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let category: String
+    let searchText: String
+    let sort: PerkSort
+    let iconName: String
+    let tint: Color
+
+    static let sampleData: [PerkCollection] = [
+        PerkCollection(
+            id: "lunch-break",
+            title: "Lunch break",
+            subtitle: "Nearby food perks for the workday.",
+            category: "Food",
+            searchText: "",
+            sort: .nearest,
+            iconName: "fork.knife",
+            tint: Color(red: 0.1, green: 0.55, blue: 0.42)
+        ),
+        PerkCollection(
+            id: "wellness",
+            title: "Wellness",
+            subtitle: "Fitness and recovery offers with strong value.",
+            category: "Fitness",
+            searchText: "",
+            sort: .bestValue,
+            iconName: "heart",
+            tint: Color(red: 0.73, green: 0.26, blue: 0.18)
+        ),
+        PerkCollection(
+            id: "online-deals",
+            title: "Online deals",
+            subtitle: "Remote-friendly offers you can use anywhere.",
+            category: "All",
+            searchText: "Online",
+            sort: .bestValue,
+            iconName: "desktopcomputer",
+            tint: Color(red: 0.15, green: 0.42, blue: 0.78)
+        ),
+        PerkCollection(
+            id: "ending-soon",
+            title: "Ending soon",
+            subtitle: "Perks to use before they expire.",
+            category: "All",
+            searchText: "",
+            sort: .endingSoon,
+            iconName: "clock",
+            tint: Color(red: 0.48, green: 0.34, blue: 0.75)
+        )
+    ]
 }
 
 private struct Perk: Identifiable {
