@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var selectedCategory = "All"
     @State private var searchText = ""
     @State private var selectedPerk: Perk?
+    @State private var isShowingNotifications = false
     @AppStorage("redeemedPerkIDs") private var redeemedPerkIDsValue = ""
     @AppStorage("savedPerkIDs") private var savedPerkIDsValue = ""
     @AppStorage("weeklyDigestEnabled") private var weeklyDigestEnabled = true
@@ -51,6 +52,9 @@ struct ContentView: View {
             } toggleSave: {
                 toggleSaved(perk)
             }
+        }
+        .sheet(isPresented: $isShowingNotifications) {
+            NotificationsView(notifications: notifications)
         }
     }
 
@@ -126,6 +130,32 @@ struct ContentView: View {
             }
     }
 
+    private var notifications: [PulseNotification] {
+        [
+            PulseNotification(
+                title: "Reward progress",
+                message: pointsUntilNextReward == 0
+                    ? "Your $25 wellness credit is ready."
+                    : "You are \(pointsUntilNextReward) points away from your next reward.",
+                iconName: "sparkles"
+            ),
+            PulseNotification(
+                title: "Saved perks",
+                message: savedPerks.isEmpty
+                    ? "Save perks from Discover to compare offers later."
+                    : "You have \(savedPerks.count) saved \(savedPerks.count == 1 ? "perk" : "perks") in Wallet.",
+                iconName: "bookmark"
+            ),
+            PulseNotification(
+                title: "Nearby offers",
+                message: nearbyPerksEnabled
+                    ? "Nearby perk alerts are enabled for local offers."
+                    : "Turn on nearby perks in Account to get local offer alerts.",
+                iconName: "location"
+            )
+        ]
+    }
+
     private func redeem(_ perk: Perk) {
         var ids = redeemedPerkIDs
         ids.insert(perk.id)
@@ -152,6 +182,11 @@ struct ContentView: View {
         ids.sorted().joined(separator: ",")
     }
 
+    private func resetDemoActivity() {
+        savedPerkIDsValue = ""
+        redeemedPerkIDsValue = ""
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
@@ -168,6 +203,7 @@ struct ContentView: View {
                 Spacer()
 
                 Button {
+                    isShowingNotifications = true
                 } label: {
                     Image(systemName: "bell.badge")
                         .font(.title3.weight(.semibold))
@@ -442,6 +478,9 @@ struct ContentView: View {
                         AccountToggleRow(iconName: "bell", title: "Weekly digest", isOn: $weeklyDigestEnabled)
                         AccountToggleRow(iconName: "location", title: "Nearby perks", isOn: $nearbyPerksEnabled)
                         AccountToggleRow(iconName: "lock", title: "Biometric unlock", isOn: $biometricUnlockEnabled)
+                        AccountActionRow(iconName: "arrow.counterclockwise", title: "Reset demo activity") {
+                            resetDemoActivity()
+                        }
                     }
                     .padding(16)
                     .background(.background, in: RoundedRectangle(cornerRadius: 8))
@@ -853,6 +892,76 @@ private struct AccountToggleRow: View {
         .toggleStyle(.switch)
         .frame(minHeight: 36)
     }
+}
+
+private struct AccountActionRow: View {
+    let iconName: String
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: iconName)
+                    .font(.headline)
+                    .foregroundStyle(Color(red: 0.73, green: 0.26, blue: 0.18))
+                    .frame(width: 28)
+
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.73, green: 0.26, blue: 0.18))
+
+                Spacer()
+            }
+            .frame(minHeight: 36)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct NotificationsView: View {
+    let notifications: [PulseNotification]
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(notifications) { notification in
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: notification.iconName)
+                        .font(.headline)
+                        .foregroundStyle(Color(red: 0.1, green: 0.55, blue: 0.42))
+                        .frame(width: 30, height: 30)
+                        .background(Color(red: 0.1, green: 0.55, blue: 0.42).opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(notification.title)
+                            .font(.headline)
+
+                        Text(notification.message)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+            .navigationTitle("Notifications")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PulseNotification: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let iconName: String
 }
 
 private struct Perk: Identifiable {
