@@ -894,6 +894,10 @@ private struct PerkDetailView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    if isRedeemed {
+                        RedeemedConfirmationView(perk: perk)
+                    }
+
                     VStack(alignment: .leading, spacing: 12) {
                         DetailRow(iconName: "tag", title: "Category", value: perk.category)
                         DetailRow(iconName: "calendar", title: "Availability", value: perk.expiration)
@@ -901,6 +905,7 @@ private struct PerkDetailView: View {
                         DetailRow(iconName: "dollarsign.circle", title: "Estimated value", value: "$\(perk.estimatedSavings)")
                         DetailRow(iconName: "qrcode", title: "Member code", value: perk.memberCode)
                         DetailRow(iconName: "checkmark.seal", title: "How to use", value: perk.redemptionInstructions)
+                        DetailRow(iconName: "doc.text", title: "Terms", value: perk.terms)
                     }
                     .padding(16)
                     .background(.background, in: RoundedRectangle(cornerRadius: 8))
@@ -983,6 +988,33 @@ private struct ActivityRow: View {
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.black.opacity(0.06))
+        )
+    }
+}
+
+private struct RedeemedConfirmationView: View {
+    let perk: Perk
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color(red: 0.1, green: 0.55, blue: 0.42))
+
+                Text("Ready to use")
+                    .font(.headline)
+            }
+
+            Text("Show code \(perk.memberCode) at checkout. This perk is also saved in your Wallet activity.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(Color(red: 0.9, green: 0.97, blue: 0.94), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(red: 0.1, green: 0.55, blue: 0.42).opacity(0.18))
         )
     }
 }
@@ -1258,6 +1290,7 @@ private struct Perk: Identifiable {
     let daysUntilExpiration: Int
     let shortDetail: String
     let redemptionInstructions: String
+    let terms: String
     let estimatedSavings: Int
     let memberCode: String
     let iconName: String
@@ -1276,6 +1309,7 @@ private struct Perk: Identifiable {
             daysUntilExpiration: 5,
             shortDetail: "Lunch near the office",
             redemptionInstructions: "Show your member code at checkout or apply the offer in the partner app.",
+            terms: "Valid once per member. Weekday orders only. Cannot be combined with other offers.",
             estimatedSavings: 12,
             memberCode: "PULSE-SG12",
             iconName: "fork.knife",
@@ -1293,6 +1327,7 @@ private struct Perk: Identifiable {
             daysUntilExpiration: 6,
             shortDetail: "Bonus credits for classes",
             redemptionInstructions: "Tap redeem, then create or connect your ClassPass account before booking.",
+            terms: "New monthly plans only. Bonus credits expire 30 days after activation.",
             estimatedSavings: 39,
             memberCode: "PULSE-FIT20",
             iconName: "figure.run",
@@ -1310,6 +1345,7 @@ private struct Perk: Identifiable {
             daysUntilExpiration: 14,
             shortDetail: "Last-minute trip savings",
             redemptionInstructions: "Use the generated promo code before confirming an eligible hotel stay.",
+            terms: "Eligible stays only. Taxes, fees, and blackout dates may apply.",
             estimatedSavings: 48,
             memberCode: "PULSE-STAY18",
             iconName: "airplane.departure",
@@ -1327,6 +1363,7 @@ private struct Perk: Identifiable {
             daysUntilExpiration: 21,
             shortDetail: "Workwear and basics",
             redemptionInstructions: "Open the partner offer and apply the member discount at checkout.",
+            terms: "Applies to full-price items. Excludes gift cards, final sale, and prior purchases.",
             estimatedSavings: 25,
             memberCode: "PULSE-EV15",
             iconName: "bag",
