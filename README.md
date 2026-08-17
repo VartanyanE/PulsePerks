@@ -1,3 +1,0 @@
-# PulsePerks
-
-Initial repository setup.
