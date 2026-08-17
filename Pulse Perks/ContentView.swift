@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var isShowingNotifications = false
     @AppStorage("redeemedPerkIDs") private var redeemedPerkIDsValue = ""
     @AppStorage("savedPerkIDs") private var savedPerkIDsValue = ""
+    @AppStorage("completedSurveyIDs") private var completedSurveyIDsValue = ""
     @AppStorage("weeklyDigestEnabled") private var weeklyDigestEnabled = true
     @AppStorage("nearbyPerksEnabled") private var nearbyPerksEnabled = true
     @AppStorage("biometricUnlockEnabled") private var biometricUnlockEnabled = false
@@ -25,12 +26,18 @@ struct ContentView: View {
     private let pointsPerRedemption = 75
     private let nextRewardPoints = 3000
     private let collections = PerkCollection.sampleData
+    private let surveys = Survey.sampleData
 
     var body: some View {
         TabView {
             discoverTab
                 .tabItem {
                     Label("Discover", systemImage: "tag")
+                }
+
+            surveysTab
+                .tabItem {
+                    Label("Surveys", systemImage: "list.clipboard")
                 }
 
             walletTab
@@ -80,6 +87,21 @@ struct ContentView: View {
         }
     }
 
+    private var surveysTab: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    surveysHero
+                    surveySection(title: "Available surveys", surveys: availableSurveys, isCompleted: false)
+                    surveySection(title: "Completed", surveys: completedSurveys, isCompleted: true)
+                }
+                .padding(20)
+            }
+            .background(Color(red: 0.96, green: 0.97, blue: 0.96))
+            .navigationTitle("Surveys")
+        }
+    }
+
     private var filteredPerks: [Perk] {
         let categoryMatches = selectedCategory == "All"
             ? perks
@@ -116,8 +138,26 @@ struct ContentView: View {
         storedIDs(from: savedPerkIDsValue)
     }
 
+    private var completedSurveyIDs: Set<String> {
+        storedIDs(from: completedSurveyIDsValue)
+    }
+
+    private var availableSurveys: [Survey] {
+        surveys.filter { !completedSurveyIDs.contains($0.id) }
+    }
+
+    private var completedSurveys: [Survey] {
+        surveys.filter { completedSurveyIDs.contains($0.id) }
+    }
+
+    private var surveyPoints: Int {
+        completedSurveys.reduce(0) { total, survey in
+            total + survey.points
+        }
+    }
+
     private var memberPoints: Int {
-        basePoints + (redeemedPerks.count * pointsPerRedemption)
+        basePoints + (redeemedPerks.count * pointsPerRedemption) + surveyPoints
     }
 
     private var pointsUntilNextReward: Int {
@@ -155,6 +195,13 @@ struct ContentView: View {
                 iconName: "bookmark"
             ),
             PulseNotification(
+                title: "Survey points",
+                message: availableSurveys.isEmpty
+                    ? "You completed every available survey."
+                    : "\(availableSurveys.count) surveys can add \(availableSurveys.reduce(0) { $0 + $1.points }) points.",
+                iconName: "list.clipboard"
+            ),
+            PulseNotification(
                 title: "Nearby offers",
                 message: nearbyPerksEnabled
                     ? "Nearby perk alerts are enabled for local offers."
@@ -182,6 +229,12 @@ struct ContentView: View {
         savedPerkIDsValue = encodedIDs(ids)
     }
 
+    private func completeSurvey(_ survey: Survey) {
+        var ids = completedSurveyIDs
+        ids.insert(survey.id)
+        completedSurveyIDsValue = encodedIDs(ids)
+    }
+
     private func storedIDs(from value: String) -> Set<String> {
         Set(value.split(separator: ",").map(String.init))
     }
@@ -193,6 +246,7 @@ struct ContentView: View {
     private func resetDemoActivity() {
         savedPerkIDsValue = ""
         redeemedPerkIDsValue = ""
+        completedSurveyIDsValue = ""
     }
 
     private func applyCollection(_ collection: PerkCollection) {
@@ -422,6 +476,61 @@ struct ContentView: View {
         }
     }
 
+    private var surveysHero: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Earn with surveys", systemImage: "list.clipboard")
+                    .font(.headline)
+
+                Spacer()
+
+                Text("+\(surveyPoints) pts earned")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Share product feedback, earn points, and use them toward member rewards.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                StatBadge(value: "\(availableSurveys.count)", label: "Available")
+                StatBadge(value: "\(completedSurveys.count)", label: "Done")
+                StatBadge(value: "\(availableSurveys.reduce(0) { $0 + $1.points })", label: "Open pts")
+            }
+        }
+        .padding(18)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.black.opacity(0.06))
+        )
+    }
+
+    private func surveySection(title: String, surveys: [Survey], isCompleted: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(title)
+                .font(.title2.weight(.bold))
+
+            if surveys.isEmpty {
+                ContentUnavailableView(
+                    isCompleted ? "No completed surveys" : "No surveys available",
+                    systemImage: isCompleted ? "checkmark.seal" : "list.clipboard",
+                    description: Text(isCompleted ? "Completed surveys will show here." : "New surveys will appear when they match your profile.")
+                )
+                .padding(.vertical, 28)
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(surveys) { survey in
+                        SurveyRow(survey: survey, isCompleted: isCompleted) {
+                            completeSurvey(survey)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var walletTab: some View {
         NavigationStack {
             ScrollView {
@@ -479,7 +588,7 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 StatBadge(value: memberPoints.formatted(), label: "Points")
                 StatBadge(value: "\(savedPerks.count)", label: "Saved")
-                StatBadge(value: "$\(savedValue)", label: "Saved value")
+                StatBadge(value: "+\(surveyPoints)", label: "Survey pts")
             }
         }
         .padding(18)
@@ -792,6 +901,71 @@ private struct PerkCollectionCard: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 118, alignment: .topLeading)
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.black.opacity(0.06))
+        )
+    }
+}
+
+private struct SurveyRow: View {
+    let survey: Survey
+    let isCompleted: Bool
+    let complete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: survey.iconName)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(survey.tint)
+                .frame(width: 44, height: 44)
+                .background(survey.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    Text(survey.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Text("+\(survey.points) pts")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color(red: 0.1, green: 0.55, blue: 0.42))
+                }
+
+                Text(survey.description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                HStack(spacing: 10) {
+                    Label(survey.estimatedTime, systemImage: "clock")
+                    Label(survey.audience, systemImage: "person.2")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Button {
+                    complete()
+                } label: {
+                    Label(isCompleted ? "Completed" : "Start survey", systemImage: isCompleted ? "checkmark.circle.fill" : "play.circle")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(isCompleted ? Color.secondary : Color.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 38)
+                        .background(
+                            isCompleted ? Color.gray.opacity(0.18) : Color(red: 0.1, green: 0.55, blue: 0.42),
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                }
+                .disabled(isCompleted)
+                .padding(.top, 4)
+            }
+        }
         .padding(14)
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
@@ -1274,6 +1448,50 @@ private struct PerkCollection: Identifiable {
             sort: .endingSoon,
             iconName: "clock",
             tint: Color(red: 0.48, green: 0.34, blue: 0.75)
+        )
+    ]
+}
+
+private struct Survey: Identifiable {
+    let id: String
+    let title: String
+    let description: String
+    let estimatedTime: String
+    let audience: String
+    let points: Int
+    let iconName: String
+    let tint: Color
+
+    static let sampleData: [Survey] = [
+        Survey(
+            id: "streaming-habits",
+            title: "Streaming habits",
+            description: "Tell us how you choose shows, subscriptions, and weekend watchlists.",
+            estimatedTime: "6 min",
+            audience: "Entertainment",
+            points: 120,
+            iconName: "play.tv",
+            tint: Color(red: 0.15, green: 0.42, blue: 0.78)
+        ),
+        Survey(
+            id: "grocery-routine",
+            title: "Grocery routine",
+            description: "Share where you shop, what you value, and how deals affect your cart.",
+            estimatedTime: "4 min",
+            audience: "Shopping",
+            points: 80,
+            iconName: "cart",
+            tint: Color(red: 0.1, green: 0.55, blue: 0.42)
+        ),
+        Survey(
+            id: "fitness-goals",
+            title: "Fitness goals",
+            description: "Help wellness partners understand classes, gear, and recovery habits.",
+            estimatedTime: "8 min",
+            audience: "Wellness",
+            points: 150,
+            iconName: "figure.run",
+            tint: Color(red: 0.73, green: 0.26, blue: 0.18)
         )
     ]
 }
