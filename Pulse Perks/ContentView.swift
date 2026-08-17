@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     @State private var selectedCategory = "All"
     @State private var selectedSort = PerkSort.bestValue
     @State private var searchText = ""
@@ -92,7 +94,7 @@ struct ContentView: View {
                 }
                 .padding(20)
             }
-            .background(Color(red: 0.96, green: 0.97, blue: 0.96))
+            .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Pulse Perks")
         }
     }
@@ -107,7 +109,7 @@ struct ContentView: View {
                 }
                 .padding(20)
             }
-            .background(Color(red: 0.96, green: 0.97, blue: 0.96))
+            .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Surveys")
         }
     }
@@ -306,8 +308,8 @@ struct ContentView: View {
         .background(
             LinearGradient(
                 colors: [
-                    Color(red: 0.95, green: 0.98, blue: 1.0),
-                    Color(red: 0.93, green: 0.96, blue: 0.91)
+                    AppTheme.heroStart(for: colorScheme),
+                    AppTheme.heroEnd(for: colorScheme)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -316,7 +318,7 @@ struct ContentView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 
@@ -344,7 +346,7 @@ struct ContentView: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 
@@ -371,7 +373,7 @@ struct ContentView: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 
@@ -390,7 +392,7 @@ struct ContentView: View {
                             .background(
                                 selectedCategory == category
                                     ? Color(red: 0.1, green: 0.55, blue: 0.42)
-                                    : Color(red: 0.91, green: 0.93, blue: 0.92),
+                                    : AppTheme.controlBackground(for: colorScheme),
                                 in: Capsule()
                             )
                     }
@@ -524,7 +526,7 @@ struct ContentView: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 
@@ -591,7 +593,7 @@ struct ContentView: View {
                 }
                 .padding(20)
             }
-            .background(Color(red: 0.96, green: 0.97, blue: 0.96))
+            .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Wallet")
         }
     }
@@ -619,7 +621,7 @@ struct ContentView: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 
@@ -637,7 +639,7 @@ struct ContentView: View {
                     .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.black.opacity(0.06))
+                            .stroke(AppTheme.stroke(for: colorScheme))
                     )
             } else {
                 VStack(spacing: 12) {
@@ -669,12 +671,12 @@ struct ContentView: View {
                     .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.black.opacity(0.06))
+                            .stroke(AppTheme.stroke(for: colorScheme))
                     )
                 }
                 .padding(20)
             }
-            .background(Color(red: 0.96, green: 0.97, blue: 0.96))
+            .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Account")
         }
     }
@@ -738,12 +740,14 @@ struct ContentView: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 }
 
 private struct StatBadge: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let value: String
     let label: String
 
@@ -760,11 +764,13 @@ private struct StatBadge: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+        .background(AppTheme.elevatedBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
 private struct MembershipCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let memberName: String
     let tier: String
     let memberCode: String
@@ -807,8 +813,8 @@ private struct MembershipCard: View {
         .background(
             LinearGradient(
                 colors: [
-                    Color(red: 0.96, green: 0.99, blue: 0.97),
-                    Color(red: 0.92, green: 0.96, blue: 1.0)
+                    AppTheme.heroStart(for: colorScheme),
+                    AppTheme.heroEnd(for: colorScheme)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -817,12 +823,14 @@ private struct MembershipCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.08))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 }
 
 private struct BarcodeView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let code: String
 
     private var bars: [CGFloat] {
@@ -841,12 +849,14 @@ private struct BarcodeView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)
-        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+        .background(AppTheme.elevatedBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityLabel("Member barcode")
     }
 }
 
 private struct RecommendedPerkCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let perk: Perk
     let isSaved: Bool
 
@@ -895,12 +905,14 @@ private struct RecommendedPerkCard: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 }
 
 private struct PerkCollectionCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let collection: PerkCollection
 
     var body: some View {
@@ -929,12 +941,14 @@ private struct PerkCollectionCard: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 }
 
 private struct SurveyRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let survey: Survey
     let isCompleted: Bool
 
@@ -983,17 +997,18 @@ private struct SurveyRow: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 }
 
 private struct SurveyDetailView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+
     let survey: Survey
     let isCompleted: Bool
     let complete: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -1031,7 +1046,7 @@ private struct SurveyDetailView: View {
                         .background(.background, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.black.opacity(0.06))
+                                .stroke(AppTheme.stroke(for: colorScheme))
                         )
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -1057,7 +1072,7 @@ private struct SurveyDetailView: View {
                     .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.black.opacity(0.06))
+                            .stroke(AppTheme.stroke(for: colorScheme))
                     )
 
                     VStack(alignment: .leading, spacing: 12) {
@@ -1072,7 +1087,7 @@ private struct SurveyDetailView: View {
                     .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.black.opacity(0.06))
+                            .stroke(AppTheme.stroke(for: colorScheme))
                     )
 
                     if isCompleted {
@@ -1081,7 +1096,7 @@ private struct SurveyDetailView: View {
                 }
                 .padding(20)
             }
-            .background(Color(red: 0.96, green: 0.97, blue: 0.96))
+            .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Survey")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1134,6 +1149,8 @@ private struct SurveyQuestionPreview: View {
 }
 
 private struct SurveyCompletionView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let points: Int
 
     var body: some View {
@@ -1152,7 +1169,7 @@ private struct SurveyCompletionView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(16)
-        .background(Color(red: 0.9, green: 0.97, blue: 0.94), in: RoundedRectangle(cornerRadius: 8))
+        .background(AppTheme.successBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(red: 0.1, green: 0.55, blue: 0.42).opacity(0.18))
@@ -1161,6 +1178,8 @@ private struct SurveyCompletionView: View {
 }
 
 private struct PerkRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let perk: Perk
     let isRedeemed: Bool
     let isSaved: Bool
@@ -1215,19 +1234,20 @@ private struct PerkRow: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 }
 
 private struct PerkDetailView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+
     let perk: Perk
     let isRedeemed: Bool
     let isSaved: Bool
     let redeem: () -> Void
     let toggleSave: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -1270,12 +1290,12 @@ private struct PerkDetailView: View {
                     .background(.background, in: RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.black.opacity(0.06))
+                            .stroke(AppTheme.stroke(for: colorScheme))
                     )
                 }
                 .padding(20)
             }
-            .background(Color(red: 0.96, green: 0.97, blue: 0.96))
+            .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Perk details")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1322,6 +1342,8 @@ private struct PerkDetailView: View {
 }
 
 private struct ActivityRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let perk: Perk
 
     var body: some View {
@@ -1346,12 +1368,14 @@ private struct ActivityRow: View {
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
 }
 
 private struct RedeemedConfirmationView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let perk: Perk
 
     var body: some View {
@@ -1370,7 +1394,7 @@ private struct RedeemedConfirmationView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(16)
-        .background(Color(red: 0.9, green: 0.97, blue: 0.94), in: RoundedRectangle(cornerRadius: 8))
+        .background(AppTheme.successBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(red: 0.1, green: 0.55, blue: 0.42).opacity(0.18))
@@ -1580,6 +1604,52 @@ private extension Array where Element == Perk {
         sorted { lhs, rhs in
             sort.compare(lhs, rhs)
         }
+    }
+}
+
+private enum AppTheme {
+    static let accent = Color(red: 0.1, green: 0.55, blue: 0.42)
+
+    static func pageBackground(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.05, green: 0.06, blue: 0.06)
+            : Color(red: 0.96, green: 0.97, blue: 0.96)
+    }
+
+    static func elevatedBackground(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.08)
+            : Color.white.opacity(0.72)
+    }
+
+    static func controlBackground(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.12)
+            : Color(red: 0.91, green: 0.93, blue: 0.92)
+    }
+
+    static func stroke(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.10)
+            : Color.black.opacity(0.06)
+    }
+
+    static func heroStart(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.07, green: 0.16, blue: 0.14)
+            : Color(red: 0.95, green: 0.98, blue: 1.0)
+    }
+
+    static func heroEnd(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.11, green: 0.13, blue: 0.20)
+            : Color(red: 0.93, green: 0.96, blue: 0.91)
+    }
+
+    static func successBackground(for colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 0.06, green: 0.18, blue: 0.13)
+            : Color(red: 0.9, green: 0.97, blue: 0.94)
     }
 }
 
