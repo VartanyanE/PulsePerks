@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var selectedSort = PerkSort.bestValue
     @State private var searchText = ""
     @State private var selectedPerk: Perk?
+    @State private var selectedSurvey: Survey?
     @State private var isShowingNotifications = false
     @AppStorage("redeemedPerkIDs") private var redeemedPerkIDsValue = ""
     @AppStorage("savedPerkIDs") private var savedPerkIDsValue = ""
@@ -64,6 +65,14 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShowingNotifications) {
             NotificationsView(notifications: notifications)
+        }
+        .sheet(item: $selectedSurvey) { survey in
+            SurveyDetailView(
+                survey: survey,
+                isCompleted: completedSurveyIDs.contains(survey.id)
+            ) {
+                completeSurvey(survey)
+            }
         }
     }
 
@@ -522,9 +531,12 @@ struct ContentView: View {
             } else {
                 LazyVStack(spacing: 12) {
                     ForEach(surveys) { survey in
-                        SurveyRow(survey: survey, isCompleted: isCompleted) {
-                            completeSurvey(survey)
+                        Button {
+                            selectedSurvey = survey
+                        } label: {
+                            SurveyRow(survey: survey, isCompleted: isCompleted)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -913,7 +925,6 @@ private struct PerkCollectionCard: View {
 private struct SurveyRow: View {
     let survey: Survey
     let isCompleted: Bool
-    let complete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -949,21 +960,10 @@ private struct SurveyRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                Button {
-                    complete()
-                } label: {
-                    Label(isCompleted ? "Completed" : "Start survey", systemImage: isCompleted ? "checkmark.circle.fill" : "play.circle")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(isCompleted ? Color.secondary : Color.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 38)
-                        .background(
-                            isCompleted ? Color.gray.opacity(0.18) : Color(red: 0.1, green: 0.55, blue: 0.42),
-                            in: RoundedRectangle(cornerRadius: 8)
-                        )
-                }
-                .disabled(isCompleted)
-                .padding(.top, 4)
+                Label(isCompleted ? "Completed" : "Tap to preview", systemImage: isCompleted ? "checkmark.circle.fill" : "chevron.right.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isCompleted ? .secondary : Color(red: 0.1, green: 0.55, blue: 0.42))
+                    .padding(.top, 4)
             }
         }
         .padding(14)
@@ -971,6 +971,144 @@ private struct SurveyRow: View {
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.black.opacity(0.06))
+        )
+    }
+}
+
+private struct SurveyDetailView: View {
+    let survey: Survey
+    let isCompleted: Bool
+    let complete: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: survey.iconName)
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(survey.tint)
+                            .frame(width: 68, height: 68)
+                            .background(survey.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(survey.audience)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(survey.tint)
+
+                            Text(survey.title)
+                                .font(.largeTitle.weight(.bold))
+
+                            Text(survey.description)
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    HStack(spacing: 12) {
+                        StatBadge(value: "+\(survey.points)", label: "Points")
+                        StatBadge(value: survey.estimatedTime, label: "Time")
+                        StatBadge(value: "\(survey.questions.count)", label: "Questions")
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Preview")
+                            .font(.headline)
+
+                        ForEach(Array(survey.questions.enumerated()), id: \.offset) { index, question in
+                            SurveyQuestionPreview(index: index + 1, question: question)
+                        }
+                    }
+                    .padding(16)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.black.opacity(0.06))
+                    )
+
+                    if isCompleted {
+                        SurveyCompletionView(points: survey.points)
+                    }
+                }
+                .padding(20)
+            }
+            .background(Color(red: 0.96, green: 0.97, blue: 0.96))
+            .navigationTitle("Survey")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    complete()
+                } label: {
+                    Label(isCompleted ? "Points awarded" : "Complete survey", systemImage: isCompleted ? "checkmark.circle.fill" : "checkmark.seal")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(
+                            isCompleted
+                                ? Color.gray
+                                : Color(red: 0.1, green: 0.55, blue: 0.42),
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                }
+                .disabled(isCompleted)
+                .padding(20)
+                .background(.regularMaterial)
+            }
+        }
+    }
+}
+
+private struct SurveyQuestionPreview: View {
+    let index: Int
+    let question: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(index)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(Color(red: 0.1, green: 0.55, blue: 0.42), in: Circle())
+
+            Text(question)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+        }
+    }
+}
+
+private struct SurveyCompletionView: View {
+    let points: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color(red: 0.1, green: 0.55, blue: 0.42))
+
+                Text("Survey complete")
+                    .font(.headline)
+            }
+
+            Text("+\(points) points were added to your rewards balance.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(Color(red: 0.9, green: 0.97, blue: 0.94), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(red: 0.1, green: 0.55, blue: 0.42).opacity(0.18))
         )
     }
 }
@@ -1459,6 +1597,7 @@ private struct Survey: Identifiable {
     let estimatedTime: String
     let audience: String
     let points: Int
+    let questions: [String]
     let iconName: String
     let tint: Color
 
@@ -1470,6 +1609,11 @@ private struct Survey: Identifiable {
             estimatedTime: "6 min",
             audience: "Entertainment",
             points: 120,
+            questions: [
+                "Which streaming services do you currently use?",
+                "How do you decide what to watch next?",
+                "What would make you switch or cancel a subscription?"
+            ],
             iconName: "play.tv",
             tint: Color(red: 0.15, green: 0.42, blue: 0.78)
         ),
@@ -1480,6 +1624,11 @@ private struct Survey: Identifiable {
             estimatedTime: "4 min",
             audience: "Shopping",
             points: 80,
+            questions: [
+                "Where do you buy groceries most often?",
+                "Which deal types change what you buy?",
+                "How often do you use loyalty rewards at checkout?"
+            ],
             iconName: "cart",
             tint: Color(red: 0.1, green: 0.55, blue: 0.42)
         ),
@@ -1490,6 +1639,11 @@ private struct Survey: Identifiable {
             estimatedTime: "8 min",
             audience: "Wellness",
             points: 150,
+            questions: [
+                "What fitness goals are you focused on this month?",
+                "Which wellness perks would you redeem fastest?",
+                "How do you choose between classes, gyms, and at-home workouts?"
+            ],
             iconName: "figure.run",
             tint: Color(red: 0.73, green: 0.26, blue: 0.18)
         )
