@@ -19,6 +19,7 @@ struct ContentView: View {
     @AppStorage("redeemedPerkIDs") private var redeemedPerkIDsValue = ""
     @AppStorage("savedPerkIDs") private var savedPerkIDsValue = ""
     @AppStorage("completedSurveyIDs") private var completedSurveyIDsValue = ""
+    @AppStorage("selectedInterestIDs") private var selectedInterestIDsValue = "shopping,wellness"
     @AppStorage("weeklyDigestEnabled") private var weeklyDigestEnabled = true
     @AppStorage("nearbyPerksEnabled") private var nearbyPerksEnabled = true
     @AppStorage("biometricUnlockEnabled") private var biometricUnlockEnabled = false
@@ -31,6 +32,7 @@ struct ContentView: View {
     private let dailySurveyGoal = 300
     private let collections = PerkCollection.sampleData
     private let surveys = Survey.sampleData
+    private let interests = Interest.sampleData
 
     var body: some View {
         TabView {
@@ -72,7 +74,9 @@ struct ContentView: View {
         .sheet(item: $selectedSurvey) { survey in
             SurveyDetailView(
                 survey: survey,
-                isCompleted: completedSurveyIDs.contains(survey.id)
+                isCompleted: completedSurveyIDs.contains(survey.id),
+                matchScore: matchScore(for: survey),
+                matchReason: matchReason(for: survey)
             ) {
                 completeSurvey(survey)
             }
@@ -152,6 +156,14 @@ struct ContentView: View {
 
     private var completedSurveyIDs: Set<String> {
         storedIDs(from: completedSurveyIDsValue)
+    }
+
+    private var selectedInterestIDs: Set<String> {
+        storedIDs(from: selectedInterestIDsValue)
+    }
+
+    private var selectedInterests: [Interest] {
+        interests.filter { selectedInterestIDs.contains($0.id) }
     }
 
     private var availableSurveys: [Survey] {
@@ -249,6 +261,37 @@ struct ContentView: View {
         var ids = completedSurveyIDs
         ids.insert(survey.id)
         completedSurveyIDsValue = encodedIDs(ids)
+    }
+
+    private func toggleInterest(_ interest: Interest) {
+        var ids = selectedInterestIDs
+
+        if ids.contains(interest.id) {
+            ids.remove(interest.id)
+        } else {
+            ids.insert(interest.id)
+        }
+
+        selectedInterestIDsValue = encodedIDs(ids)
+    }
+
+    private func matchScore(for survey: Survey) -> Int {
+        let overlap = survey.interestIDs.intersection(selectedInterestIDs).count
+        let preferenceBoost = overlap * 5
+        let digestBoost = weeklyDigestEnabled ? 2 : 0
+        return min(survey.matchScore + preferenceBoost + digestBoost, 99)
+    }
+
+    private func matchReason(for survey: Survey) -> String {
+        let matches = selectedInterests
+            .filter { survey.interestIDs.contains($0.id) }
+            .map(\.title)
+
+        if matches.isEmpty {
+            return survey.matchReason
+        }
+
+        return "Matched because your profile includes \(matches.joined(separator: ", "))."
     }
 
     private func storedIDs(from value: String) -> Set<String> {
@@ -548,7 +591,11 @@ struct ContentView: View {
                         Button {
                             selectedSurvey = survey
                         } label: {
-                            SurveyRow(survey: survey, isCompleted: isCompleted)
+                            SurveyRow(
+                                survey: survey,
+                                isCompleted: isCompleted,
+                                matchScore: matchScore(for: survey)
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -673,12 +720,42 @@ struct ContentView: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(AppTheme.stroke(for: colorScheme))
                     )
+
+                    surveyPreferences
                 }
                 .padding(20)
             }
             .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Account")
         }
+    }
+
+    private var surveyPreferences: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Survey interests")
+                .font(.title2.weight(.bold))
+
+            Text("Choose topics to improve survey matching.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                ForEach(interests) { interest in
+                    InterestChip(
+                        interest: interest,
+                        isSelected: selectedInterestIDs.contains(interest.id)
+                    ) {
+                        toggleInterest(interest)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
     }
 
     private func walletSection(
@@ -951,6 +1028,7 @@ private struct SurveyRow: View {
 
     let survey: Survey
     let isCompleted: Bool
+    let matchScore: Int
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -982,7 +1060,7 @@ private struct SurveyRow: View {
                 HStack(spacing: 10) {
                     Label(survey.estimatedTime, systemImage: "clock")
                     Label(survey.audience, systemImage: "person.2")
-                    Label("\(survey.matchScore)% match", systemImage: "scope")
+                    Label("\(matchScore)% match", systemImage: "scope")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1008,6 +1086,8 @@ private struct SurveyDetailView: View {
 
     let survey: Survey
     let isCompleted: Bool
+    let matchScore: Int
+    let matchReason: String
     let complete: () -> Void
 
     var body: some View {
@@ -1038,7 +1118,7 @@ private struct SurveyDetailView: View {
                     HStack(spacing: 12) {
                         StatBadge(value: "+\(survey.points)", label: "Points")
                         StatBadge(value: survey.estimatedTime, label: "Time")
-                        StatBadge(value: "\(survey.matchScore)%", label: "Match")
+                        StatBadge(value: "\(matchScore)%", label: "Match")
                     }
 
                     DetailRow(iconName: "questionmark.circle", title: "Question count", value: "\(survey.questions.count) questions")
@@ -1056,15 +1136,15 @@ private struct SurveyDetailView: View {
 
                             Spacer()
 
-                            Text("\(survey.matchScore)%")
+                            Text("\(matchScore)%")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.secondary)
                         }
 
-                        ProgressView(value: Double(survey.matchScore), total: 100)
+                        ProgressView(value: Double(matchScore), total: 100)
                             .tint(survey.tint)
 
-                        Text(survey.matchReason)
+                        Text(matchReason)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -1500,6 +1580,41 @@ private struct AccountActionRow: View {
     }
 }
 
+private struct InterestChip: View {
+    let interest: Interest
+    let isSelected: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 8) {
+                Image(systemName: interest.iconName)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(interest.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+
+                Spacer()
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.caption.weight(.bold))
+            }
+            .foregroundStyle(isSelected ? .white : .primary)
+            .padding(.horizontal, 12)
+            .frame(height: 42)
+            .background(
+                isSelected
+                    ? Color(red: 0.1, green: 0.55, blue: 0.42)
+                    : Color.primary.opacity(0.06),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct NotificationsView: View {
     let notifications: [PulseNotification]
 
@@ -1543,6 +1658,19 @@ private struct PulseNotification: Identifiable {
     let title: String
     let message: String
     let iconName: String
+}
+
+private struct Interest: Identifiable {
+    let id: String
+    let title: String
+    let iconName: String
+
+    static let sampleData: [Interest] = [
+        Interest(id: "entertainment", title: "Entertainment", iconName: "play.tv"),
+        Interest(id: "shopping", title: "Shopping", iconName: "cart"),
+        Interest(id: "wellness", title: "Wellness", iconName: "heart"),
+        Interest(id: "travel", title: "Travel", iconName: "airplane.departure")
+    ]
 }
 
 private enum PerkSort: String, CaseIterable, Identifiable {
@@ -1716,6 +1844,7 @@ private struct Survey: Identifiable {
     let points: Int
     let matchScore: Int
     let matchReason: String
+    let interestIDs: Set<String>
     let questions: [String]
     let iconName: String
     let tint: Color
@@ -1730,6 +1859,7 @@ private struct Survey: Identifiable {
             points: 120,
             matchScore: 92,
             matchReason: "Matched because you saved travel and lifestyle offers and have weekly digest enabled.",
+            interestIDs: ["entertainment", "travel"],
             questions: [
                 "Which streaming services do you currently use?",
                 "How do you decide what to watch next?",
@@ -1747,6 +1877,7 @@ private struct Survey: Identifiable {
             points: 80,
             matchScore: 86,
             matchReason: "Matched because retail and food rewards are active in your marketplace.",
+            interestIDs: ["shopping"],
             questions: [
                 "Where do you buy groceries most often?",
                 "Which deal types change what you buy?",
@@ -1764,6 +1895,7 @@ private struct Survey: Identifiable {
             points: 150,
             matchScore: 94,
             matchReason: "Matched because wellness rewards and nearby offers are enabled for your profile.",
+            interestIDs: ["wellness"],
             questions: [
                 "What fitness goals are you focused on this month?",
                 "Which wellness perks would you redeem fastest?",
