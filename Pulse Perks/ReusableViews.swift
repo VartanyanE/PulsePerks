@@ -1,0 +1,837 @@
+//
+//  ReusableViews.swift
+//  Pulse Perks
+//
+
+import SwiftUI
+
+struct StatBadge: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.headline.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(AppTheme.elevatedBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct MembershipCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let memberName: String
+    let tier: String
+    let memberCode: String
+    let points: Int
+    let savedValue: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(tier)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+
+                    Text(memberName)
+                        .font(.largeTitle.weight(.bold))
+                        .foregroundStyle(.primary)
+                }
+
+                Spacer()
+
+                Image(systemName: "waveform.path.ecg")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(AppTheme.accent)
+            }
+
+            BarcodeView(code: memberCode)
+
+            HStack(spacing: 12) {
+                StatBadge(value: points.formatted(), label: "Points")
+                StatBadge(value: "$\(savedValue)", label: "Saved")
+            }
+
+            Text(memberCode)
+                .font(.system(.callout, design: .monospaced).weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(20)
+        .background(
+            LinearGradient(
+                colors: [
+                    AppTheme.heroStart(for: colorScheme),
+                    AppTheme.heroEnd(for: colorScheme)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+}
+
+struct BarcodeView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let code: String
+
+    private var bars: [CGFloat] {
+        code.unicodeScalars.enumerated().map { index, scalar in
+            CGFloat((Int(scalar.value) + index) % 4 + 1)
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 3) {
+            ForEach(Array(bars.enumerated()), id: \.offset) { _, width in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.primary)
+                    .frame(width: width, height: 58)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+        .background(AppTheme.elevatedBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityLabel("Member barcode")
+    }
+}
+
+struct RecommendedPerkCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let perk: Perk
+    let isSaved: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Image(systemName: perk.iconName)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(perk.tint)
+                    .frame(width: 42, height: 42)
+                    .background(perk.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+                Spacer()
+
+                if isSaved {
+                    Image(systemName: "bookmark.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("$\(perk.estimatedSavings) value")
+                    .font(.title3.weight(.bold))
+
+                Text(perk.partner)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(perk.shortDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            HStack {
+                Label(perk.distance, systemImage: "location")
+                Spacer()
+                Text(perk.category)
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        .frame(width: 210, alignment: .leading)
+        .padding(16)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+}
+
+struct PerkCollectionCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let collection: PerkCollection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: collection.iconName)
+                .font(.headline)
+                .foregroundStyle(collection.tint)
+                .frame(width: 38, height: 38)
+                .background(collection.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(collection.title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+
+                Text(collection.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 118, alignment: .topLeading)
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+}
+
+struct SurveyRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let survey: Survey
+    let isCompleted: Bool
+    let matchScore: Int
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: survey.iconName)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(survey.tint)
+                .frame(width: 44, height: 44)
+                .background(survey.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    Text(survey.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Text("+\(survey.points) pts")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+
+                Text(survey.description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                HStack(spacing: 10) {
+                    Label(survey.estimatedTime, systemImage: "clock")
+                    Label(survey.audience, systemImage: "person.2")
+                    Label("\(matchScore)% match", systemImage: "scope")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                Label(isCompleted ? "Completed" : "Tap to preview", systemImage: isCompleted ? "checkmark.circle.fill" : "chevron.right.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isCompleted ? .secondary : AppTheme.accent)
+                    .padding(.top, 4)
+            }
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+}
+
+struct SurveyDetailView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+
+    let survey: Survey
+    let isCompleted: Bool
+    let matchScore: Int
+    let matchReason: String
+    let complete: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: survey.iconName)
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(survey.tint)
+                            .frame(width: 68, height: 68)
+                            .background(survey.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(survey.audience)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(survey.tint)
+
+                            Text(survey.title)
+                                .font(.largeTitle.weight(.bold))
+
+                            Text(survey.description)
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    HStack(spacing: 12) {
+                        StatBadge(value: "+\(survey.points)", label: "Points")
+                        StatBadge(value: survey.estimatedTime, label: "Time")
+                        StatBadge(value: "\(matchScore)%", label: "Match")
+                    }
+
+                    DetailRow(iconName: "questionmark.circle", title: "Question count", value: "\(survey.questions.count) questions")
+                        .padding(16)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(AppTheme.stroke(for: colorScheme))
+                        )
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("Profile fit", systemImage: "scope")
+                                .font(.headline)
+
+                            Spacer()
+
+                            Text("\(matchScore)%")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ProgressView(value: Double(matchScore), total: 100)
+                            .tint(survey.tint)
+
+                        Text(matchReason)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(16)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(AppTheme.stroke(for: colorScheme))
+                    )
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Preview")
+                            .font(.headline)
+
+                        ForEach(Array(survey.questions.enumerated()), id: \.offset) { index, question in
+                            SurveyQuestionPreview(index: index + 1, question: question)
+                        }
+                    }
+                    .padding(16)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(AppTheme.stroke(for: colorScheme))
+                    )
+
+                    if isCompleted {
+                        SurveyCompletionView(points: survey.points)
+                    }
+                }
+                .padding(20)
+            }
+            .background(AppTheme.pageBackground(for: colorScheme))
+            .navigationTitle("Survey")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    complete()
+                } label: {
+                    Label(isCompleted ? "Points awarded" : "Complete survey", systemImage: isCompleted ? "checkmark.circle.fill" : "checkmark.seal")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(
+                            isCompleted
+                                ? Color.gray
+                                : AppTheme.accent,
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                }
+                .disabled(isCompleted)
+                .padding(20)
+                .background(.regularMaterial)
+            }
+        }
+    }
+}
+
+struct SurveyQuestionPreview: View {
+    let index: Int
+    let question: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(index)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(AppTheme.accent, in: Circle())
+
+            Text(question)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+        }
+    }
+}
+
+struct SurveyCompletionView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let points: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.accent)
+
+                Text("Survey complete")
+                    .font(.headline)
+            }
+
+            Text("+\(points) points were added to your rewards balance.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(AppTheme.successBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.accent.opacity(0.18))
+        )
+    }
+}
+
+struct PerkRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let perk: Perk
+    let isRedeemed: Bool
+    let isSaved: Bool
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: perk.iconName)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(perk.tint)
+                .frame(width: 44, height: 44)
+                .background(perk.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(perk.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Text(isRedeemed ? "Redeemed" : perk.category)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isRedeemed ? AppTheme.accent : .secondary)
+                }
+
+                Text(perk.description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                Text(perk.expiration)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+
+                HStack(spacing: 10) {
+                    Label(perk.distance, systemImage: "location")
+                    Label("$\(perk.estimatedSavings) value", systemImage: "dollarsign.circle")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if isSaved {
+                Image(systemName: "bookmark.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .accessibilityLabel("Saved")
+            }
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+}
+
+struct PerkDetailView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+
+    let perk: Perk
+    let isRedeemed: Bool
+    let isSaved: Bool
+    let redeem: () -> Void
+    let toggleSave: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    Image(systemName: perk.iconName)
+                        .font(.system(size: 38, weight: .semibold))
+                        .foregroundStyle(perk.tint)
+                        .frame(width: 76, height: 76)
+                        .background(perk.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(perk.partner)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(perk.tint)
+
+                        Text(perk.title)
+                            .font(.largeTitle.weight(.bold))
+                            .foregroundStyle(.primary)
+
+                        Text(perk.description)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if isRedeemed {
+                        RedeemedConfirmationView(perk: perk)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        DetailRow(iconName: "tag", title: "Category", value: perk.category)
+                        DetailRow(iconName: "calendar", title: "Availability", value: perk.expiration)
+                        DetailRow(iconName: "location", title: "Distance", value: perk.distance)
+                        DetailRow(iconName: "dollarsign.circle", title: "Estimated value", value: "$\(perk.estimatedSavings)")
+                        DetailRow(iconName: "qrcode", title: "Member code", value: perk.memberCode)
+                        DetailRow(iconName: "checkmark.seal", title: "How to use", value: perk.redemptionInstructions)
+                        DetailRow(iconName: "doc.text", title: "Terms", value: perk.terms)
+                    }
+                    .padding(16)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(AppTheme.stroke(for: colorScheme))
+                    )
+                }
+                .padding(20)
+            }
+            .background(AppTheme.pageBackground(for: colorScheme))
+            .navigationTitle("Perk details")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                HStack(spacing: 12) {
+                    Button {
+                        toggleSave()
+                    } label: {
+                        Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                            .font(.headline)
+                            .foregroundStyle(AppTheme.accent)
+                            .frame(width: 52, height: 52)
+                            .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .accessibilityLabel(isSaved ? "Remove saved perk" : "Save perk")
+
+                    Button {
+                        redeem()
+                    } label: {
+                        Label(isRedeemed ? "Redeemed" : "Redeem perk", systemImage: isRedeemed ? "checkmark.circle.fill" : "ticket")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 52)
+                            .background(
+                                isRedeemed
+                                    ? Color.gray
+                                    : AppTheme.accent,
+                                in: RoundedRectangle(cornerRadius: 8)
+                            )
+                    }
+                    .disabled(isRedeemed)
+                }
+                .padding(20)
+                .background(.regularMaterial)
+            }
+        }
+    }
+}
+
+struct ActivityRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let perk: Perk
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Redeemed \(perk.partner)")
+                    .font(.subheadline.weight(.semibold))
+
+                Text("Saved about $\(perk.estimatedSavings) with code \(perk.memberCode)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+}
+
+struct RedeemedConfirmationView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let perk: Perk
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(AppTheme.accent)
+
+                Text("Ready to use")
+                    .font(.headline)
+            }
+
+            Text("Show code \(perk.memberCode) at checkout. This perk is also saved in your Wallet activity.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(AppTheme.successBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.accent.opacity(0.18))
+        )
+    }
+}
+
+struct DetailRow: View {
+    let iconName: String
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: iconName)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text(value)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+            }
+        }
+    }
+}
+
+struct AccountRow: View {
+    let iconName: String
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: iconName)
+                .font(.headline)
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 28)
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+
+            Spacer()
+
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+        }
+        .frame(minHeight: 36)
+    }
+}
+
+struct AccountToggleRow: View {
+    let iconName: String
+    let title: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            HStack(spacing: 12) {
+                Image(systemName: iconName)
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 28)
+
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+            }
+        }
+        .toggleStyle(.switch)
+        .frame(minHeight: 36)
+    }
+}
+
+struct AccountActionRow: View {
+    let iconName: String
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: iconName)
+                    .font(.headline)
+                    .foregroundStyle(Color(red: 0.73, green: 0.26, blue: 0.18))
+                    .frame(width: 28)
+
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.73, green: 0.26, blue: 0.18))
+
+                Spacer()
+            }
+            .frame(minHeight: 36)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct InterestChip: View {
+    let interest: Interest
+    let isSelected: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 8) {
+                Image(systemName: interest.iconName)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(interest.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+
+                Spacer()
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.caption.weight(.bold))
+            }
+            .foregroundStyle(isSelected ? .white : .primary)
+            .padding(.horizontal, 12)
+            .frame(height: 42)
+            .background(
+                isSelected
+                    ? AppTheme.accent
+                    : Color.primary.opacity(0.06),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct NotificationsView: View {
+    let notifications: [PulseNotification]
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(notifications) { notification in
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: notification.iconName)
+                        .font(.headline)
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 30, height: 30)
+                        .background(AppTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(notification.title)
+                            .font(.headline)
+
+                        Text(notification.message)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+            .navigationTitle("Notifications")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}

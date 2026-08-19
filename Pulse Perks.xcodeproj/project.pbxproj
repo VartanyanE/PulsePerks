@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
+		DECA392330353142009A7A3A /* PulsePerksStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PulsePerksStoreTests.swift; sourceTree = "<group>"; };
 		DED01CF93032A96900DCDA8F /* Pulse Perks.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Pulse Perks.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -29,11 +30,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		DECA392230353142009A7A3A /* Pulse PerksTests */ = {
+			isa = PBXGroup;
+			children = (
+				DECA392330353142009A7A3A /* PulsePerksStoreTests.swift */,
+			);
+			path = "Pulse PerksTests";
+			sourceTree = "<group>";
+		};
 		DED01CF03032A96900DCDA8F = {
 			isa = PBXGroup;
 			children = (
 				DED01CFB3032A96900DCDA8F /* Pulse Perks */,
 				DED01CFA3032A96900DCDA8F /* Products */,
+				DECA392230353142009A7A3A /* Pulse PerksTests */,
 			);
 			sourceTree = "<group>";
 		};
