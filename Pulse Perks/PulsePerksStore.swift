@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 struct PulsePerksStore {
     let memberProfile: MemberProfile
@@ -29,6 +30,43 @@ struct PulsePerksStore {
         nextRewardPoints: 3000,
         dailySurveyGoal: 300
     )
+
+    init(response: PulsePerksBootstrapResponse) {
+        memberProfile = MemberProfile(response: response.member)
+        categories = response.categories
+        perks = response.perks.map(Perk.init(response:))
+        collections = response.collections.map(PerkCollection.init(response:))
+        surveys = response.surveys.map(Survey.init(response:))
+        interests = response.interests.map(Interest.init(response:))
+        basePoints = response.rewards.basePoints
+        pointsPerRedemption = response.rewards.pointsPerRedemption
+        nextRewardPoints = response.rewards.nextRewardPoints
+        dailySurveyGoal = response.rewards.dailySurveyGoal
+    }
+
+    init(
+        memberProfile: MemberProfile,
+        categories: [String],
+        perks: [Perk],
+        collections: [PerkCollection],
+        surveys: [Survey],
+        interests: [Interest],
+        basePoints: Int,
+        pointsPerRedemption: Int,
+        nextRewardPoints: Int,
+        dailySurveyGoal: Int
+    ) {
+        self.memberProfile = memberProfile
+        self.categories = categories
+        self.perks = perks
+        self.collections = collections
+        self.surveys = surveys
+        self.interests = interests
+        self.basePoints = basePoints
+        self.pointsPerRedemption = pointsPerRedemption
+        self.nextRewardPoints = nextRewardPoints
+        self.dailySurveyGoal = dailySurveyGoal
+    }
 
     func filteredPerks(category: String, searchText: String, sort: PerkSort) -> [Perk] {
         let categoryMatches = category == "All"
@@ -92,5 +130,99 @@ struct PulsePerksStore {
         perks
             .filter { !redeemedIDs.contains($0.id) }
             .sorted(using: .bestValue)
+    }
+}
+
+private extension MemberProfile {
+    init(response: MemberProfileResponse) {
+        self.init(
+            id: response.id,
+            name: response.name,
+            tier: response.tier,
+            memberCode: response.memberCode,
+            memberSinceYear: response.memberSinceYear
+        )
+    }
+}
+
+private extension Interest {
+    init(response: InterestResponse) {
+        self.init(
+            id: response.id,
+            title: response.title,
+            iconName: response.iconName
+        )
+    }
+}
+
+private extension Survey {
+    init(response: SurveyResponse) {
+        self.init(
+            id: response.id,
+            title: response.title,
+            description: response.description,
+            estimatedTime: response.estimatedTime,
+            audience: response.audience,
+            points: response.points,
+            matchScore: response.matchScore,
+            matchReason: response.matchReason,
+            interestIDs: Set(response.interestIDs),
+            questions: response.questions,
+            iconName: response.iconName,
+            tint: Color(hex: response.tintHex)
+        )
+    }
+}
+
+private extension PerkCollection {
+    init(response: PerkCollectionResponse) {
+        self.init(
+            id: response.id,
+            title: response.title,
+            subtitle: response.subtitle,
+            category: response.category,
+            searchText: response.searchText,
+            sort: response.sort,
+            iconName: response.iconName,
+            tint: Color(hex: response.tintHex)
+        )
+    }
+}
+
+private extension Perk {
+    init(response: PerkResponse) {
+        self.init(
+            id: response.id,
+            title: response.title,
+            description: response.description,
+            partner: response.partner,
+            category: response.category,
+            expiration: response.expiration,
+            distance: response.distance,
+            distanceInMiles: response.distanceInMiles,
+            daysUntilExpiration: response.daysUntilExpiration,
+            shortDetail: response.shortDetail,
+            redemptionInstructions: response.redemptionInstructions,
+            terms: response.terms,
+            estimatedSavings: response.estimatedSavings,
+            memberCode: response.memberCode,
+            iconName: response.iconName,
+            tint: Color(hex: response.tintHex)
+        )
+    }
+}
+
+private extension Color {
+    init(hex: String) {
+        let normalizedHex = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let scanner = Scanner(string: normalizedHex)
+        var value: UInt64 = 0
+        scanner.scanHexInt64(&value)
+
+        let red = Double((value & 0xFF0000) >> 16) / 255
+        let green = Double((value & 0x00FF00) >> 8) / 255
+        let blue = Double(value & 0x0000FF) / 255
+
+        self.init(red: red, green: green, blue: blue)
     }
 }

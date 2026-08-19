@@ -24,7 +24,17 @@ struct ContentView: View {
     @AppStorage("nearbyPerksEnabled") private var nearbyPerksEnabled = true
     @AppStorage("biometricUnlockEnabled") private var biometricUnlockEnabled = false
 
-    private let store = PulsePerksStore.demo
+    @State private var store = PulsePerksStore.demo
+    @State private var backendState = BackendState.notConfigured
+    @State private var backendStatusDetail = "Using local demo data"
+
+    private let backend: PulsePerksBackend? = SupabaseConfiguration.bundled.map {
+        SupabasePulsePerksClient(configuration: $0)
+    }
+
+    private var backendHost: String {
+        SupabaseConfiguration.bundled?.projectURL.host() ?? "Not configured"
+    }
 
     private var categories: [String] {
         store.categories
@@ -112,6 +122,18 @@ struct ContentView: View {
             ) {
                 completeSurvey(survey)
             }
+        }
+        .task {
+            await loadBootstrap()
+        }
+        .onChange(of: weeklyDigestEnabled) {
+            syncPreferences()
+        }
+        .onChange(of: nearbyPerksEnabled) {
+            syncPreferences()
+        }
+        .onChange(of: biometricUnlockEnabled) {
+            syncPreferences()
         }
     }
 
@@ -251,24 +273,45 @@ struct ContentView: View {
         var ids = redeemedPerkIDs
         ids.insert(perk.id)
         redeemedPerkIDsValue = encodedIDs(ids)
+
+        Task {
+            await syncActivity {
+                try await $0.redeemPerk(id: perk.id)
+            }
+        }
     }
 
     private func toggleSaved(_ perk: Perk) {
         var ids = savedPerkIDs
+        let isSaved: Bool
 
         if ids.contains(perk.id) {
             ids.remove(perk.id)
+            isSaved = false
         } else {
             ids.insert(perk.id)
+            isSaved = true
         }
 
         savedPerkIDsValue = encodedIDs(ids)
+
+        Task {
+            await syncActivity {
+                try await $0.savePerk(id: perk.id, isSaved: isSaved)
+            }
+        }
     }
 
     private func completeSurvey(_ survey: Survey) {
         var ids = completedSurveyIDs
         ids.insert(survey.id)
         completedSurveyIDsValue = encodedIDs(ids)
+
+        Task {
+            await syncActivity {
+                try await $0.completeSurvey(id: survey.id)
+            }
+        }
     }
 
     private func toggleInterest(_ interest: Interest) {
@@ -281,6 +324,72 @@ struct ContentView: View {
         }
 
         selectedInterestIDsValue = encodedIDs(ids)
+        syncPreferences()
+    }
+
+    private func loadBootstrap() async {
+        guard let backend else {
+            backendState = .notConfigured
+            backendStatusDetail = "Supabase URL/key not configured"
+            return
+        }
+
+        backendState = .loading
+        backendStatusDetail = "Loading Supabase data"
+
+        do {
+            let response = try await backend.fetchBootstrap()
+            store = PulsePerksStore(response: response)
+            applyActivity(response.activity)
+            backendState = .connected
+            backendStatusDetail = "Connected as \(memberProfile.id)"
+        } catch {
+            backendState = .failed
+            backendStatusDetail = error.localizedDescription
+        }
+    }
+
+    private func syncPreferences() {
+        Task {
+            await syncActivity { backend in
+                try await backend.updatePreferences(
+                    PreferencesUpdateRequest(
+                        selectedInterestIDs: Array(selectedInterestIDs).sorted(),
+                        weeklyDigestEnabled: weeklyDigestEnabled,
+                        nearbyPerksEnabled: nearbyPerksEnabled,
+                        biometricUnlockEnabled: biometricUnlockEnabled
+                    )
+                )
+            }
+        }
+    }
+
+    private func syncActivity(
+        _ operation: (PulsePerksBackend) async throws -> MemberActivityResponse
+    ) async {
+        guard let backend else {
+            return
+        }
+
+        do {
+            let activity = try await operation(backend)
+            applyActivity(activity)
+            backendState = .connected
+            backendStatusDetail = "Synced \(Date.now.formatted(date: .omitted, time: .shortened))"
+        } catch {
+            backendState = .failed
+            backendStatusDetail = error.localizedDescription
+        }
+    }
+
+    private func applyActivity(_ activity: MemberActivityResponse) {
+        savedPerkIDsValue = encodedIDs(Set(activity.savedPerkIDs))
+        redeemedPerkIDsValue = encodedIDs(Set(activity.redeemedPerkIDs))
+        completedSurveyIDsValue = encodedIDs(Set(activity.completedSurveyIDs))
+        selectedInterestIDsValue = encodedIDs(Set(activity.selectedInterestIDs))
+        weeklyDigestEnabled = activity.weeklyDigestEnabled
+        nearbyPerksEnabled = activity.nearbyPerksEnabled
+        biometricUnlockEnabled = activity.biometricUnlockEnabled
     }
 
     private func matchScore(for survey: Survey) -> Int {
@@ -715,6 +824,9 @@ struct ContentView: View {
                     VStack(spacing: 12) {
                         AccountRow(iconName: "person.text.rectangle", title: "Membership", value: memberProfile.tier)
                         AccountRow(iconName: "creditcard", title: "Payment method", value: "Not connected")
+                        AccountRow(iconName: backendState.iconName, title: "Data source", value: backendState.title)
+                        AccountRow(iconName: "info.circle", title: "Backend status", value: backendStatusDetail)
+                        AccountRow(iconName: "network", title: "Backend host", value: backendHost)
                         AccountToggleRow(iconName: "bell", title: "Weekly digest", isOn: $weeklyDigestEnabled)
                         AccountToggleRow(iconName: "location", title: "Nearby perks", isOn: $nearbyPerksEnabled)
                         AccountToggleRow(iconName: "lock", title: "Biometric unlock", isOn: $biometricUnlockEnabled)
@@ -827,6 +939,39 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(AppTheme.stroke(for: colorScheme))
         )
+    }
+}
+
+private enum BackendState {
+    case notConfigured
+    case loading
+    case connected
+    case failed
+
+    var title: String {
+        switch self {
+        case .notConfigured:
+            "Demo"
+        case .loading:
+            "Syncing"
+        case .connected:
+            "Supabase"
+        case .failed:
+            "Offline"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .notConfigured:
+            "tray"
+        case .loading:
+            "arrow.triangle.2.circlepath"
+        case .connected:
+            "checkmark.icloud"
+        case .failed:
+            "exclamationmark.icloud"
+        }
     }
 }
 
