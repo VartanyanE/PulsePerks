@@ -36,6 +36,7 @@ struct ContentView: View {
     @State private var redeemingPerkIDs = Set<String>()
     @State private var savingPerkIDs = Set<String>()
     @State private var completingSurveyIDs = Set<String>()
+    @State private var localActivityModifiedAt: Date?
 
     @State private var store = PulsePerksStore.demo
     @State private var backendState = BackendState.notConfigured
@@ -62,6 +63,7 @@ struct ContentView: View {
         _weeklyDigestEnabled = State(initialValue: cachedActivity.weeklyDigestEnabled)
         _nearbyPerksEnabled = State(initialValue: cachedActivity.nearbyPerksEnabled)
         _biometricUnlockEnabled = State(initialValue: cachedActivity.biometricUnlockEnabled)
+        _localActivityModifiedAt = State(initialValue: cachedActivity.modifiedAt)
         _activeAuthSession = State(initialValue: authSession)
 
         if let cachedBootstrap = UserBootstrapCache.load(userID: authSession.userID) {
@@ -501,12 +503,25 @@ struct ContentView: View {
         backendStatusDetail = "Loading Supabase data"
 
         do {
+            let localActivitySnapshot = currentActivityResponse
             let response = try await performAuthenticatedRequest { backend in
                 try await backend.fetchBootstrap()
             }
+            let mergedActivity = response.activity.mergedWithLocalSnapshot(
+                localActivitySnapshot,
+                localModifiedAt: localActivityModifiedAt
+            )
             store = PulsePerksStore(response: response)
             UserBootstrapCache.save(response, userID: authSession.userID)
-            applyActivity(response.activity)
+            applyActivity(mergedActivity)
+
+            if mergedActivity != response.activity {
+                let syncedActivity = try await performAuthenticatedRequest { backend in
+                    try await backend.syncActivity(mergedActivity)
+                }
+                applyActivity(syncedActivity)
+            }
+
             backendState = .connected
             backendStatusDetail = "Connected as \(activeAuthSession.userID)"
             lastBootstrapSync = Date()
@@ -567,6 +582,7 @@ struct ContentView: View {
         preferenceSyncTask = nil
         activitySyncTask?.cancel()
         activitySyncTask = nil
+        UserDataCache.clear(userID: authSession.userID)
         signOut()
     }
 
@@ -668,11 +684,24 @@ struct ContentView: View {
         weeklyDigestEnabled = activity.weeklyDigestEnabled
         nearbyPerksEnabled = activity.nearbyPerksEnabled
         biometricUnlockEnabled = activity.biometricUnlockEnabled
-        cacheActivity()
+        cacheActivity(modifiedAt: activity.serverUpdatedAt ?? Date())
         UserBootstrapCache.updateActivity(activity, userID: authSession.userID)
     }
 
-    private func cacheActivity() {
+    private var currentActivityResponse: MemberActivityResponse {
+        MemberActivityResponse(
+            savedPerkIDs: Array(savedPerkIDs).sorted(),
+            redeemedPerkIDs: Array(redeemedPerkIDs).sorted(),
+            completedSurveyIDs: Array(completedSurveyIDs).sorted(),
+            selectedInterestIDs: Array(selectedInterestIDs).sorted(),
+            weeklyDigestEnabled: weeklyDigestEnabled,
+            nearbyPerksEnabled: nearbyPerksEnabled,
+            biometricUnlockEnabled: biometricUnlockEnabled
+        )
+    }
+
+    private func cacheActivity(modifiedAt: Date = Date()) {
+        localActivityModifiedAt = modifiedAt
         UserActivityCache(
             redeemedPerkIDsValue: redeemedPerkIDsValue,
             savedPerkIDsValue: savedPerkIDsValue,
@@ -680,7 +709,8 @@ struct ContentView: View {
             selectedInterestIDsValue: selectedInterestIDsValue,
             weeklyDigestEnabled: weeklyDigestEnabled,
             nearbyPerksEnabled: nearbyPerksEnabled,
-            biometricUnlockEnabled: biometricUnlockEnabled
+            biometricUnlockEnabled: biometricUnlockEnabled,
+            modifiedAt: modifiedAt
         )
         .save(userID: authSession.userID)
     }
@@ -1332,6 +1362,50 @@ private struct UserActivityCache: Codable {
     let weeklyDigestEnabled: Bool
     let nearbyPerksEnabled: Bool
     let biometricUnlockEnabled: Bool
+    let modifiedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case redeemedPerkIDsValue
+        case savedPerkIDsValue
+        case completedSurveyIDsValue
+        case selectedInterestIDsValue
+        case weeklyDigestEnabled
+        case nearbyPerksEnabled
+        case biometricUnlockEnabled
+        case modifiedAt
+    }
+
+    init(
+        redeemedPerkIDsValue: String,
+        savedPerkIDsValue: String,
+        completedSurveyIDsValue: String,
+        selectedInterestIDsValue: String,
+        weeklyDigestEnabled: Bool,
+        nearbyPerksEnabled: Bool,
+        biometricUnlockEnabled: Bool,
+        modifiedAt: Date?
+    ) {
+        self.redeemedPerkIDsValue = redeemedPerkIDsValue
+        self.savedPerkIDsValue = savedPerkIDsValue
+        self.completedSurveyIDsValue = completedSurveyIDsValue
+        self.selectedInterestIDsValue = selectedInterestIDsValue
+        self.weeklyDigestEnabled = weeklyDigestEnabled
+        self.nearbyPerksEnabled = nearbyPerksEnabled
+        self.biometricUnlockEnabled = biometricUnlockEnabled
+        self.modifiedAt = modifiedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        redeemedPerkIDsValue = try container.decode(String.self, forKey: .redeemedPerkIDsValue)
+        savedPerkIDsValue = try container.decode(String.self, forKey: .savedPerkIDsValue)
+        completedSurveyIDsValue = try container.decode(String.self, forKey: .completedSurveyIDsValue)
+        selectedInterestIDsValue = try container.decode(String.self, forKey: .selectedInterestIDsValue)
+        weeklyDigestEnabled = try container.decode(Bool.self, forKey: .weeklyDigestEnabled)
+        nearbyPerksEnabled = try container.decode(Bool.self, forKey: .nearbyPerksEnabled)
+        biometricUnlockEnabled = try container.decode(Bool.self, forKey: .biometricUnlockEnabled)
+        modifiedAt = try container.decodeIfPresent(Date.self, forKey: .modifiedAt)
+    }
 
     static func load(userID: String) -> UserActivityCache {
         guard
@@ -1352,6 +1426,10 @@ private struct UserActivityCache: Codable {
         UserDefaults.standard.set(data, forKey: Self.key(for: userID))
     }
 
+    static func clear(userID: String) {
+        UserDefaults.standard.removeObject(forKey: key(for: userID))
+    }
+
     private static func key(for userID: String) -> String {
         "userActivity.\(userID)"
     }
@@ -1364,7 +1442,8 @@ private struct UserActivityCache: Codable {
             selectedInterestIDsValue: "shopping,wellness",
             weeklyDigestEnabled: true,
             nearbyPerksEnabled: true,
-            biometricUnlockEnabled: false
+            biometricUnlockEnabled: false,
+            modifiedAt: nil
         )
     }
 }
@@ -1433,8 +1512,19 @@ private struct UserBootstrapCache: Codable {
         UserDefaults.standard.set(data, forKey: key(for: userID))
     }
 
+    static func clear(userID: String) {
+        UserDefaults.standard.removeObject(forKey: key(for: userID))
+    }
+
     private static func key(for userID: String) -> String {
         "userBootstrap.\(userID)"
+    }
+}
+
+enum UserDataCache {
+    static func clear(userID: String) {
+        UserActivityCache.clear(userID: userID)
+        UserBootstrapCache.clear(userID: userID)
     }
 }
 

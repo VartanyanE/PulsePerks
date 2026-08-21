@@ -124,4 +124,72 @@ struct PulsePerksStoreTests {
         #expect(forbiddenError.isAuthenticationFailure)
         #expect(!rateLimitError.isAuthenticationFailure)
     }
+
+    @Test func activityMergePreservesLocalAndRemoteProgress() {
+        let remoteActivity = MemberActivityResponse(
+            savedPerkIDs: ["sweetgreen-lunch-credit"],
+            redeemedPerkIDs: ["hoteltonight-escape"],
+            completedSurveyIDs: ["streaming-habits"],
+            selectedInterestIDs: ["travel"],
+            weeklyDigestEnabled: false,
+            nearbyPerksEnabled: false,
+            biometricUnlockEnabled: false
+        )
+        let localActivity = MemberActivityResponse(
+            savedPerkIDs: ["classpass-trial-boost"],
+            redeemedPerkIDs: ["hoteltonight-escape", "everlane-essentials"],
+            completedSurveyIDs: ["fitness-goals"],
+            selectedInterestIDs: ["shopping", "wellness"],
+            weeklyDigestEnabled: true,
+            nearbyPerksEnabled: true,
+            biometricUnlockEnabled: true
+        )
+
+        let mergedActivity = remoteActivity.mergedWithLocalSnapshot(localActivity)
+
+        #expect(mergedActivity.savedPerkIDs == ["classpass-trial-boost", "sweetgreen-lunch-credit"])
+        #expect(mergedActivity.redeemedPerkIDs == ["everlane-essentials", "hoteltonight-escape"])
+        #expect(mergedActivity.completedSurveyIDs == ["fitness-goals", "streaming-habits"])
+        #expect(mergedActivity.selectedInterestIDs == ["shopping", "wellness"])
+        #expect(mergedActivity.weeklyDigestEnabled)
+        #expect(mergedActivity.nearbyPerksEnabled)
+        #expect(mergedActivity.biometricUnlockEnabled)
+    }
+
+    @Test func activityMergeKeepsRemotePreferencesWhenServerIsNewer() {
+        let serverUpdatedAt = Date()
+        let localModifiedAt = serverUpdatedAt.addingTimeInterval(-60)
+        let remoteActivity = MemberActivityResponse(
+            savedPerkIDs: ["sweetgreen-lunch-credit"],
+            redeemedPerkIDs: [],
+            completedSurveyIDs: [],
+            selectedInterestIDs: ["travel"],
+            weeklyDigestEnabled: false,
+            nearbyPerksEnabled: false,
+            biometricUnlockEnabled: false,
+            serverUpdatedAt: serverUpdatedAt
+        )
+        let localActivity = MemberActivityResponse(
+            savedPerkIDs: ["classpass-trial-boost"],
+            redeemedPerkIDs: ["everlane-essentials"],
+            completedSurveyIDs: ["fitness-goals"],
+            selectedInterestIDs: ["shopping", "wellness"],
+            weeklyDigestEnabled: true,
+            nearbyPerksEnabled: true,
+            biometricUnlockEnabled: true
+        )
+
+        let mergedActivity = remoteActivity.mergedWithLocalSnapshot(
+            localActivity,
+            localModifiedAt: localModifiedAt
+        )
+
+        #expect(mergedActivity.savedPerkIDs == ["classpass-trial-boost", "sweetgreen-lunch-credit"])
+        #expect(mergedActivity.redeemedPerkIDs == ["everlane-essentials"])
+        #expect(mergedActivity.completedSurveyIDs == ["fitness-goals"])
+        #expect(mergedActivity.selectedInterestIDs == ["travel"])
+        #expect(!mergedActivity.weeklyDigestEnabled)
+        #expect(!mergedActivity.nearbyPerksEnabled)
+        #expect(!mergedActivity.biometricUnlockEnabled)
+    }
 }
