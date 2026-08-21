@@ -11,7 +11,7 @@ import SwiftUI
 struct Pulse_PerksApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
         }
     }
 }

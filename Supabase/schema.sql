@@ -100,6 +100,30 @@ create table if not exists public.surveys (
     display_order integer not null default 0
 );
 
+create table if not exists public.survey_responses (
+    member_id text not null references public.member_profiles(id) on delete cascade,
+    survey_id text not null references public.surveys(id) on delete cascade,
+    question_index integer not null,
+    question text not null,
+    answer text not null,
+    submitted_at timestamptz not null default now(),
+    primary key (member_id, survey_id, question_index)
+);
+
+create table if not exists public.perk_redemptions (
+    member_id text not null references public.member_profiles(id) on delete cascade,
+    perk_id text not null references public.perks(id) on delete cascade,
+    redeemed_at timestamptz not null default now(),
+    primary key (member_id, perk_id)
+);
+
+create table if not exists public.saved_perks (
+    member_id text not null references public.member_profiles(id) on delete cascade,
+    perk_id text not null references public.perks(id) on delete cascade,
+    saved_at timestamptz not null default now(),
+    primary key (member_id, perk_id)
+);
+
 alter table public.app_config enable row level security;
 alter table public.member_profiles enable row level security;
 alter table public.member_activity enable row level security;
@@ -107,21 +131,37 @@ alter table public.interests enable row level security;
 alter table public.perks enable row level security;
 alter table public.perk_collections enable row level security;
 alter table public.surveys enable row level security;
+alter table public.survey_responses enable row level security;
+alter table public.perk_redemptions enable row level security;
+alter table public.saved_perks enable row level security;
 
 drop policy if exists "Read app config" on public.app_config;
 create policy "Read app config" on public.app_config for select using (true);
 
 drop policy if exists "Read member profiles" on public.member_profiles;
-create policy "Read member profiles" on public.member_profiles for select using (true);
+create policy "Read member profiles" on public.member_profiles
+for select using (id = auth.uid()::text);
+
+drop policy if exists "Insert own member profile" on public.member_profiles;
+create policy "Insert own member profile" on public.member_profiles
+for insert with check (id = auth.uid()::text);
+
+drop policy if exists "Update own member profile" on public.member_profiles;
+create policy "Update own member profile" on public.member_profiles
+for update using (id = auth.uid()::text) with check (id = auth.uid()::text);
 
 drop policy if exists "Read member activity" on public.member_activity;
-create policy "Read member activity" on public.member_activity for select using (true);
+create policy "Read member activity" on public.member_activity
+for select using (member_id = auth.uid()::text);
 
 drop policy if exists "Insert member activity" on public.member_activity;
-create policy "Insert member activity" on public.member_activity for insert with check (true);
+create policy "Insert member activity" on public.member_activity
+for insert with check (member_id = auth.uid()::text);
 
 drop policy if exists "Update member activity" on public.member_activity;
-create policy "Update member activity" on public.member_activity for update using (true) with check (true);
+create policy "Update member activity" on public.member_activity
+for update using (member_id = auth.uid()::text)
+with check (member_id = auth.uid()::text);
 
 drop policy if exists "Read interests" on public.interests;
 create policy "Read interests" on public.interests for select using (true);
@@ -134,6 +174,44 @@ create policy "Read perk collections" on public.perk_collections for select usin
 
 drop policy if exists "Read surveys" on public.surveys;
 create policy "Read surveys" on public.surveys for select using (true);
+
+drop policy if exists "Read own survey responses" on public.survey_responses;
+create policy "Read own survey responses" on public.survey_responses
+for select using (member_id = auth.uid()::text);
+
+drop policy if exists "Insert own survey responses" on public.survey_responses;
+create policy "Insert own survey responses" on public.survey_responses
+for insert with check (member_id = auth.uid()::text);
+
+drop policy if exists "Update own survey responses" on public.survey_responses;
+create policy "Update own survey responses" on public.survey_responses
+for update using (member_id = auth.uid()::text)
+with check (member_id = auth.uid()::text);
+
+drop policy if exists "Read own perk redemptions" on public.perk_redemptions;
+create policy "Read own perk redemptions" on public.perk_redemptions
+for select using (member_id = auth.uid()::text);
+
+drop policy if exists "Insert own perk redemptions" on public.perk_redemptions;
+create policy "Insert own perk redemptions" on public.perk_redemptions
+for insert with check (member_id = auth.uid()::text);
+
+drop policy if exists "Read own saved perks" on public.saved_perks;
+create policy "Read own saved perks" on public.saved_perks
+for select using (member_id = auth.uid()::text);
+
+drop policy if exists "Insert own saved perks" on public.saved_perks;
+create policy "Insert own saved perks" on public.saved_perks
+for insert with check (member_id = auth.uid()::text);
+
+drop policy if exists "Update own saved perks" on public.saved_perks;
+create policy "Update own saved perks" on public.saved_perks
+for update using (member_id = auth.uid()::text)
+with check (member_id = auth.uid()::text);
+
+drop policy if exists "Delete own saved perks" on public.saved_perks;
+create policy "Delete own saved perks" on public.saved_perks
+for delete using (member_id = auth.uid()::text);
 
 insert into public.app_config (
     id,

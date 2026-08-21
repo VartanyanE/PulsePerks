@@ -1,0 +1,15 @@
+.DS_Store
+
+# Xcode local user state
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+xcuserdata/
+
+# Local build output
+DerivedData/
+build/
+Products/

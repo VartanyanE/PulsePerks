@@ -8,7 +8,13 @@
 import SwiftUI
 
 struct ContentView: View {
+    let configuration: SupabaseConfiguration
+    let authSession: AuthSession
+    let refreshSession: (Bool) async throws -> AuthSession
+    let signOut: () -> Void
+
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var selectedCategory = "All"
     @State private var selectedSort = PerkSort.bestValue
@@ -16,24 +22,62 @@ struct ContentView: View {
     @State private var selectedPerk: Perk?
     @State private var selectedSurvey: Survey?
     @State private var isShowingNotifications = false
-    @AppStorage("redeemedPerkIDs") private var redeemedPerkIDsValue = ""
-    @AppStorage("savedPerkIDs") private var savedPerkIDsValue = ""
-    @AppStorage("completedSurveyIDs") private var completedSurveyIDsValue = ""
-    @AppStorage("selectedInterestIDs") private var selectedInterestIDsValue = "shopping,wellness"
-    @AppStorage("weeklyDigestEnabled") private var weeklyDigestEnabled = true
-    @AppStorage("nearbyPerksEnabled") private var nearbyPerksEnabled = true
-    @AppStorage("biometricUnlockEnabled") private var biometricUnlockEnabled = false
+    @State private var isShowingProfileEditor = false
+    @State private var redeemedPerkIDsValue: String
+    @State private var savedPerkIDsValue: String
+    @State private var completedSurveyIDsValue: String
+    @State private var selectedInterestIDsValue: String
+    @State private var weeklyDigestEnabled: Bool
+    @State private var nearbyPerksEnabled: Bool
+    @State private var biometricUnlockEnabled: Bool
+    @State private var activeAuthSession: AuthSession
+    @State private var preferenceSyncTask: Task<Void, Never>?
+    @State private var activitySyncTask: Task<Void, Never>?
+    @State private var redeemingPerkIDs = Set<String>()
+    @State private var savingPerkIDs = Set<String>()
+    @State private var completingSurveyIDs = Set<String>()
 
     @State private var store = PulsePerksStore.demo
     @State private var backendState = BackendState.notConfigured
     @State private var backendStatusDetail = "Using local demo data"
+    @State private var isLoadingBootstrap = false
+    @State private var lastBootstrapSync: Date?
 
-    private let backend: PulsePerksBackend? = SupabaseConfiguration.bundled.map {
-        SupabasePulsePerksClient(configuration: $0)
+    init(
+        configuration: SupabaseConfiguration,
+        authSession: AuthSession,
+        refreshSession: @escaping (Bool) async throws -> AuthSession,
+        signOut: @escaping () -> Void
+    ) {
+        self.configuration = configuration
+        self.authSession = authSession
+        self.refreshSession = refreshSession
+        self.signOut = signOut
+
+        let cachedActivity = UserActivityCache.load(userID: authSession.userID)
+        _redeemedPerkIDsValue = State(initialValue: cachedActivity.redeemedPerkIDsValue)
+        _savedPerkIDsValue = State(initialValue: cachedActivity.savedPerkIDsValue)
+        _completedSurveyIDsValue = State(initialValue: cachedActivity.completedSurveyIDsValue)
+        _selectedInterestIDsValue = State(initialValue: cachedActivity.selectedInterestIDsValue)
+        _weeklyDigestEnabled = State(initialValue: cachedActivity.weeklyDigestEnabled)
+        _nearbyPerksEnabled = State(initialValue: cachedActivity.nearbyPerksEnabled)
+        _biometricUnlockEnabled = State(initialValue: cachedActivity.biometricUnlockEnabled)
+        _activeAuthSession = State(initialValue: authSession)
+
+        if let cachedBootstrap = UserBootstrapCache.load(userID: authSession.userID) {
+            _store = State(initialValue: PulsePerksStore(response: cachedBootstrap.response))
+            _backendState = State(initialValue: .failed)
+            _backendStatusDetail = State(initialValue: "Using saved data until Supabase syncs.")
+            _lastBootstrapSync = State(initialValue: cachedBootstrap.cachedAt)
+        }
+    }
+
+    private var backend: PulsePerksBackend {
+        SupabasePulsePerksClient(configuration: configuration.authenticated(with: activeAuthSession))
     }
 
     private var backendHost: String {
-        SupabaseConfiguration.bundled?.projectURL.host() ?? "Not configured"
+        configuration.projectURL.host() ?? "Not configured"
     }
 
     private var categories: [String] {
@@ -119,21 +163,29 @@ struct ContentView: View {
                 isCompleted: completedSurveyIDs.contains(survey.id),
                 matchScore: matchScore(for: survey),
                 matchReason: matchReason(for: survey)
-            ) {
-                completeSurvey(survey)
+            ) { responses in
+                completeSurvey(survey, responses: responses)
+            }
+        }
+        .sheet(isPresented: $isShowingProfileEditor) {
+            EditProfileView(profile: memberProfile) { request in
+                await updateProfile(request)
             }
         }
         .task {
             await loadBootstrap()
         }
-        .onChange(of: weeklyDigestEnabled) {
-            syncPreferences()
+        .onChange(of: authSession) { _, newSession in
+            activeAuthSession = newSession
         }
-        .onChange(of: nearbyPerksEnabled) {
-            syncPreferences()
-        }
-        .onChange(of: biometricUnlockEnabled) {
-            syncPreferences()
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else {
+                return
+            }
+
+            Task {
+                await refreshBootstrapIfStale()
+            }
         }
     }
 
@@ -141,6 +193,7 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    syncStatusBanner
                     header
                     rewardsProgress
                     forYouPerks
@@ -152,6 +205,9 @@ struct ContentView: View {
                 }
                 .padding(20)
             }
+            .refreshable {
+                await loadBootstrap()
+            }
             .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Pulse Perks")
         }
@@ -161,11 +217,15 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    syncStatusBanner
                     surveysHero
                     surveySection(title: "Available surveys", surveys: availableSurveys, isCompleted: false)
                     surveySection(title: "Completed", surveys: completedSurveys, isCompleted: true)
                 }
                 .padding(20)
+            }
+            .refreshable {
+                await loadBootstrap()
             }
             .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Surveys")
@@ -202,6 +262,33 @@ struct ContentView: View {
 
     private var selectedInterests: [Interest] {
         interests.filter { selectedInterestIDs.contains($0.id) }
+    }
+
+    private var weeklyDigestBinding: Binding<Bool> {
+        Binding {
+            weeklyDigestEnabled
+        } set: { newValue in
+            weeklyDigestEnabled = newValue
+            syncPreferences()
+        }
+    }
+
+    private var nearbyPerksBinding: Binding<Bool> {
+        Binding {
+            nearbyPerksEnabled
+        } set: { newValue in
+            nearbyPerksEnabled = newValue
+            syncPreferences()
+        }
+    }
+
+    private var biometricUnlockBinding: Binding<Bool> {
+        Binding {
+            biometricUnlockEnabled
+        } set: { newValue in
+            biometricUnlockEnabled = newValue
+            syncPreferences()
+        }
     }
 
     private var availableSurveys: [Survey] {
@@ -269,19 +356,68 @@ struct ContentView: View {
         ]
     }
 
+    @ViewBuilder
+    private var syncStatusBanner: some View {
+        switch backendState {
+        case .loading:
+            SyncStatusBanner(
+                iconName: backendState.iconName,
+                title: "Syncing",
+                message: "Refreshing your perks and survey activity.",
+                isLoading: isLoadingBootstrap,
+                actionTitle: nil,
+                action: nil
+            )
+        case .failed:
+            SyncStatusBanner(
+                iconName: backendState.iconName,
+                title: "Offline mode",
+                message: backendStatusDetail,
+                isLoading: isLoadingBootstrap,
+                actionTitle: "Retry",
+                action: retryBootstrap
+            )
+        case .notConfigured, .connected:
+            EmptyView()
+        }
+    }
+
     private func redeem(_ perk: Perk) {
+        guard !redeemedPerkIDs.contains(perk.id),
+              !redeemingPerkIDs.contains(perk.id) else {
+            return
+        }
+
+        redeemingPerkIDs.insert(perk.id)
+        let previousValue = redeemedPerkIDsValue
+
         var ids = redeemedPerkIDs
         ids.insert(perk.id)
         redeemedPerkIDsValue = encodedIDs(ids)
+        cacheActivity()
 
-        Task {
-            await syncActivity {
+        enqueueActivitySync {
+            let didSync = await syncActivity {
                 try await $0.redeemPerk(id: perk.id)
             }
+
+            if !didSync {
+                redeemedPerkIDsValue = previousValue
+                cacheActivity()
+            }
+
+            redeemingPerkIDs.remove(perk.id)
         }
     }
 
     private func toggleSaved(_ perk: Perk) {
+        guard !savingPerkIDs.contains(perk.id) else {
+            return
+        }
+
+        savingPerkIDs.insert(perk.id)
+        let previousValue = savedPerkIDsValue
+
         var ids = savedPerkIDs
         let isSaved: Bool
 
@@ -294,23 +430,47 @@ struct ContentView: View {
         }
 
         savedPerkIDsValue = encodedIDs(ids)
+        cacheActivity()
 
-        Task {
-            await syncActivity {
+        enqueueActivitySync {
+            let didSync = await syncActivity {
                 try await $0.savePerk(id: perk.id, isSaved: isSaved)
             }
+
+            if !didSync {
+                savedPerkIDsValue = previousValue
+                cacheActivity()
+            }
+
+            savingPerkIDs.remove(perk.id)
         }
     }
 
-    private func completeSurvey(_ survey: Survey) {
+    private func completeSurvey(_ survey: Survey, responses: [SurveyAnswerRequest]) {
+        guard !completedSurveyIDs.contains(survey.id),
+              !completingSurveyIDs.contains(survey.id) else {
+            return
+        }
+
+        completingSurveyIDs.insert(survey.id)
+        let previousValue = completedSurveyIDsValue
+
         var ids = completedSurveyIDs
         ids.insert(survey.id)
         completedSurveyIDsValue = encodedIDs(ids)
+        cacheActivity()
 
-        Task {
-            await syncActivity {
-                try await $0.completeSurvey(id: survey.id)
+        enqueueActivitySync {
+            let didSync = await syncActivity {
+                try await $0.completeSurvey(id: survey.id, responses: responses)
             }
+
+            if !didSync {
+                completedSurveyIDsValue = previousValue
+                cacheActivity()
+            }
+
+            completingSurveyIDs.remove(survey.id)
         }
     }
 
@@ -328,57 +488,175 @@ struct ContentView: View {
     }
 
     private func loadBootstrap() async {
-        guard let backend else {
-            backendState = .notConfigured
-            backendStatusDetail = "Supabase URL/key not configured"
+        guard !isLoadingBootstrap else {
             return
+        }
+
+        isLoadingBootstrap = true
+        defer {
+            isLoadingBootstrap = false
         }
 
         backendState = .loading
         backendStatusDetail = "Loading Supabase data"
 
         do {
-            let response = try await backend.fetchBootstrap()
+            let response = try await performAuthenticatedRequest { backend in
+                try await backend.fetchBootstrap()
+            }
             store = PulsePerksStore(response: response)
+            UserBootstrapCache.save(response, userID: authSession.userID)
             applyActivity(response.activity)
             backendState = .connected
-            backendStatusDetail = "Connected as \(memberProfile.id)"
+            backendStatusDetail = "Connected as \(activeAuthSession.userID)"
+            lastBootstrapSync = Date()
         } catch {
             backendState = .failed
             backendStatusDetail = error.localizedDescription
         }
     }
 
+    private func refreshBootstrapIfStale() async {
+        guard shouldRefreshBootstrapOnForeground else {
+            return
+        }
+
+        await loadBootstrap()
+    }
+
+    private var shouldRefreshBootstrapOnForeground: Bool {
+        if backendState == .failed {
+            return true
+        }
+
+        guard let lastBootstrapSync else {
+            return true
+        }
+
+        return Date().timeIntervalSince(lastBootstrapSync) > 300
+    }
+
     private func syncPreferences() {
-        Task {
-            await syncActivity { backend in
-                try await backend.updatePreferences(
-                    PreferencesUpdateRequest(
-                        selectedInterestIDs: Array(selectedInterestIDs).sorted(),
-                        weeklyDigestEnabled: weeklyDigestEnabled,
-                        nearbyPerksEnabled: nearbyPerksEnabled,
-                        biometricUnlockEnabled: biometricUnlockEnabled
+        cacheActivity()
+        preferenceSyncTask?.cancel()
+
+        preferenceSyncTask = Task {
+            do {
+                try await Task.sleep(nanoseconds: 350_000_000)
+            } catch {
+                return
+            }
+
+            enqueueActivitySync {
+                await syncActivity { backend in
+                    try await backend.updatePreferences(
+                        PreferencesUpdateRequest(
+                            selectedInterestIDs: Array(selectedInterestIDs).sorted(),
+                            weeklyDigestEnabled: weeklyDigestEnabled,
+                            nearbyPerksEnabled: nearbyPerksEnabled,
+                            biometricUnlockEnabled: biometricUnlockEnabled
+                        )
                     )
-                )
+                }
             }
         }
     }
 
-    private func syncActivity(
-        _ operation: (PulsePerksBackend) async throws -> MemberActivityResponse
-    ) async {
-        guard let backend else {
-            return
+    private func signOutUser() {
+        preferenceSyncTask?.cancel()
+        preferenceSyncTask = nil
+        activitySyncTask?.cancel()
+        activitySyncTask = nil
+        signOut()
+    }
+
+    private func enqueueActivitySync(_ operation: @escaping () async -> Void) {
+        let previousTask = activitySyncTask
+
+        activitySyncTask = Task {
+            await previousTask?.value
+
+            guard !Task.isCancelled else {
+                return
+            }
+
+            await operation()
         }
+    }
+
+    private func retryBootstrap() {
+        Task {
+            await loadBootstrap()
+        }
+    }
+
+    private func performAuthenticatedRequest<Response>(
+        _ operation: (PulsePerksBackend) async throws -> Response
+    ) async throws -> Response {
+        try await refreshActiveSessionIfNeeded()
 
         do {
-            let activity = try await operation(backend)
+            return try await operation(backend)
+        } catch let error as PulsePerksAPIError where error.isAuthenticationFailure {
+            try await refreshActiveSessionIfNeeded(force: true)
+            return try await operation(backend)
+        }
+    }
+
+    @discardableResult
+    private func refreshActiveSessionIfNeeded(force: Bool = false) async throws -> AuthSession {
+        guard force || activeAuthSession.shouldRefresh else {
+            return activeAuthSession
+        }
+
+        let refreshedSession = try await refreshSession(force)
+        activeAuthSession = refreshedSession
+        return refreshedSession
+    }
+
+    @discardableResult
+    private func syncActivity(
+        _ operation: (PulsePerksBackend) async throws -> MemberActivityResponse
+    ) async -> Bool {
+        do {
+            let activity = try await performAuthenticatedRequest(operation)
             applyActivity(activity)
             backendState = .connected
             backendStatusDetail = "Synced \(Date.now.formatted(date: .omitted, time: .shortened))"
+            return true
         } catch {
             backendState = .failed
             backendStatusDetail = error.localizedDescription
+            return false
+        }
+    }
+
+    @discardableResult
+    private func updateProfile(_ request: ProfileUpdateRequest) async -> Bool {
+        do {
+            let response = try await performAuthenticatedRequest { backend in
+                try await backend.updateProfile(request)
+            }
+            store = PulsePerksStore(
+                memberProfile: MemberProfile(response: response),
+                categories: categories,
+                perks: perks,
+                collections: collections,
+                surveys: surveys,
+                interests: interests,
+                basePoints: basePoints,
+                pointsPerRedemption: pointsPerRedemption,
+                nextRewardPoints: nextRewardPoints,
+                dailySurveyGoal: dailySurveyGoal
+            )
+            UserBootstrapCache.updateProfile(response, userID: authSession.userID)
+            backendState = .connected
+            backendStatusDetail = "Profile updated"
+            return true
+        } catch {
+            backendState = .failed
+            backendStatusDetail = error.localizedDescription
+            return false
         }
     }
 
@@ -390,6 +668,21 @@ struct ContentView: View {
         weeklyDigestEnabled = activity.weeklyDigestEnabled
         nearbyPerksEnabled = activity.nearbyPerksEnabled
         biometricUnlockEnabled = activity.biometricUnlockEnabled
+        cacheActivity()
+        UserBootstrapCache.updateActivity(activity, userID: authSession.userID)
+    }
+
+    private func cacheActivity() {
+        UserActivityCache(
+            redeemedPerkIDsValue: redeemedPerkIDsValue,
+            savedPerkIDsValue: savedPerkIDsValue,
+            completedSurveyIDsValue: completedSurveyIDsValue,
+            selectedInterestIDsValue: selectedInterestIDsValue,
+            weeklyDigestEnabled: weeklyDigestEnabled,
+            nearbyPerksEnabled: nearbyPerksEnabled,
+            biometricUnlockEnabled: biometricUnlockEnabled
+        )
+        .save(userID: authSession.userID)
     }
 
     private func matchScore(for survey: Survey) -> Int {
@@ -417,12 +710,6 @@ struct ContentView: View {
 
     private func encodedIDs(_ ids: Set<String>) -> String {
         ids.sorted().joined(separator: ",")
-    }
-
-    private func resetDemoActivity() {
-        savedPerkIDsValue = ""
-        redeemedPerkIDsValue = ""
-        completedSurveyIDsValue = ""
     }
 
     private func applyCollection(_ collection: PerkCollection) {
@@ -725,6 +1012,7 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    syncStatusBanner
                     MembershipCard(
                         memberName: memberProfile.name,
                         tier: memberProfile.tier,
@@ -756,6 +1044,9 @@ struct ContentView: View {
                     recentActivity
                 }
                 .padding(20)
+            }
+            .refreshable {
+                await loadBootstrap()
             }
             .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Wallet")
@@ -824,14 +1115,23 @@ struct ContentView: View {
                     VStack(spacing: 12) {
                         AccountRow(iconName: "person.text.rectangle", title: "Membership", value: memberProfile.tier)
                         AccountRow(iconName: "creditcard", title: "Payment method", value: "Not connected")
+                        AccountRow(iconName: "envelope", title: "Signed in", value: activeAuthSession.email)
                         AccountRow(iconName: backendState.iconName, title: "Data source", value: backendState.title)
                         AccountRow(iconName: "info.circle", title: "Backend status", value: backendStatusDetail)
                         AccountRow(iconName: "network", title: "Backend host", value: backendHost)
-                        AccountToggleRow(iconName: "bell", title: "Weekly digest", isOn: $weeklyDigestEnabled)
-                        AccountToggleRow(iconName: "location", title: "Nearby perks", isOn: $nearbyPerksEnabled)
-                        AccountToggleRow(iconName: "lock", title: "Biometric unlock", isOn: $biometricUnlockEnabled)
-                        AccountActionRow(iconName: "arrow.counterclockwise", title: "Reset demo activity") {
-                            resetDemoActivity()
+                        AccountRetryRow(isLoading: isLoadingBootstrap) {
+                            Task {
+                                await loadBootstrap()
+                            }
+                        }
+                        AccountActionRow(iconName: "pencil", title: "Edit profile") {
+                            isShowingProfileEditor = true
+                        }
+                        AccountToggleRow(iconName: "bell", title: "Weekly digest", isOn: weeklyDigestBinding)
+                        AccountToggleRow(iconName: "location", title: "Nearby perks", isOn: nearbyPerksBinding)
+                        AccountToggleRow(iconName: "lock", title: "Biometric unlock", isOn: biometricUnlockBinding)
+                        AccountActionRow(iconName: "rectangle.portrait.and.arrow.right", title: "Sign out") {
+                            signOutUser()
                         }
                     }
                     .padding(16)
@@ -844,6 +1144,9 @@ struct ContentView: View {
                     surveyPreferences
                 }
                 .padding(20)
+            }
+            .refreshable {
+                await loadBootstrap()
             }
             .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Account")
@@ -926,7 +1229,7 @@ struct ContentView: View {
                 Text(memberProfile.name)
                     .font(.title2.weight(.bold))
 
-                Text("Member since \(memberProfile.memberSinceYear)")
+                Text("Member since \(String(memberProfile.memberSinceYear))")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -975,6 +1278,283 @@ private enum BackendState {
     }
 }
 
+private struct SyncStatusBanner: View {
+    let iconName: String
+    let title: String
+    let message: String
+    let isLoading: Bool
+    let actionTitle: String?
+    let action: (() -> Void)?
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: iconName)
+                .font(.headline)
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+
+            Spacer()
+
+            if isLoading {
+                ProgressView()
+            } else if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .font(.caption.weight(.bold))
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(14)
+        .background(AppTheme.controlBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+}
+
+private struct UserActivityCache: Codable {
+    let redeemedPerkIDsValue: String
+    let savedPerkIDsValue: String
+    let completedSurveyIDsValue: String
+    let selectedInterestIDsValue: String
+    let weeklyDigestEnabled: Bool
+    let nearbyPerksEnabled: Bool
+    let biometricUnlockEnabled: Bool
+
+    static func load(userID: String) -> UserActivityCache {
+        guard
+            let data = UserDefaults.standard.data(forKey: key(for: userID)),
+            let cache = try? JSONDecoder().decode(UserActivityCache.self, from: data)
+        else {
+            return .default
+        }
+
+        return cache
+    }
+
+    func save(userID: String) {
+        guard let data = try? JSONEncoder().encode(self) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: Self.key(for: userID))
+    }
+
+    private static func key(for userID: String) -> String {
+        "userActivity.\(userID)"
+    }
+
+    static var `default`: UserActivityCache {
+        UserActivityCache(
+            redeemedPerkIDsValue: "",
+            savedPerkIDsValue: "",
+            completedSurveyIDsValue: "",
+            selectedInterestIDsValue: "shopping,wellness",
+            weeklyDigestEnabled: true,
+            nearbyPerksEnabled: true,
+            biometricUnlockEnabled: false
+        )
+    }
+}
+
+private struct UserBootstrapCache: Codable {
+    let response: PulsePerksBootstrapResponse
+    let cachedAt: Date
+
+    static func load(userID: String) -> UserBootstrapCache? {
+        guard
+            let data = UserDefaults.standard.data(forKey: key(for: userID)),
+            let cache = try? JSONDecoder().decode(UserBootstrapCache.self, from: data)
+        else {
+            return nil
+        }
+
+        return cache
+    }
+
+    static func save(_ response: PulsePerksBootstrapResponse, userID: String) {
+        let cache = UserBootstrapCache(response: response, cachedAt: Date())
+        save(cache, userID: userID)
+    }
+
+    static func updateProfile(_ profile: MemberProfileResponse, userID: String) {
+        guard let cache = load(userID: userID) else {
+            return
+        }
+
+        let updatedResponse = PulsePerksBootstrapResponse(
+            member: profile,
+            rewards: cache.response.rewards,
+            categories: cache.response.categories,
+            perks: cache.response.perks,
+            collections: cache.response.collections,
+            surveys: cache.response.surveys,
+            interests: cache.response.interests,
+            activity: cache.response.activity
+        )
+        save(UserBootstrapCache(response: updatedResponse, cachedAt: Date()), userID: userID)
+    }
+
+    static func updateActivity(_ activity: MemberActivityResponse, userID: String) {
+        guard let cache = load(userID: userID) else {
+            return
+        }
+
+        let updatedResponse = PulsePerksBootstrapResponse(
+            member: cache.response.member,
+            rewards: cache.response.rewards,
+            categories: cache.response.categories,
+            perks: cache.response.perks,
+            collections: cache.response.collections,
+            surveys: cache.response.surveys,
+            interests: cache.response.interests,
+            activity: activity
+        )
+        save(UserBootstrapCache(response: updatedResponse, cachedAt: Date()), userID: userID)
+    }
+
+    private static func save(_ cache: UserBootstrapCache, userID: String) {
+        guard let data = try? JSONEncoder().encode(cache) else {
+            return
+        }
+
+        UserDefaults.standard.set(data, forKey: key(for: userID))
+    }
+
+    private static func key(for userID: String) -> String {
+        "userBootstrap.\(userID)"
+    }
+}
+
+private struct EditProfileView: View {
+    let profile: MemberProfile
+    let save: (ProfileUpdateRequest) async -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var name: String
+    @State private var isSaving = false
+    @State private var statusMessage: String?
+
+    init(profile: MemberProfile, save: @escaping (ProfileUpdateRequest) async -> Bool) {
+        self.profile = profile
+        self.save = save
+        _name = State(initialValue: profile.name)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Profile") {
+                    TextField("Name", text: $name)
+                        .textContentType(.name)
+                        .onChange(of: name) {
+                            statusMessage = nil
+                        }
+
+                    LabeledContent("Membership", value: profile.tier)
+                    LabeledContent("Member code", value: profile.memberCode)
+                }
+
+                if let statusMessage {
+                    Section {
+                        Label(statusMessage, systemImage: "exclamationmark.triangle")
+                            .font(.subheadline)
+                            .foregroundStyle(Color(red: 0.73, green: 0.26, blue: 0.18))
+                    }
+                }
+            }
+            .navigationTitle("Edit Profile")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .disabled(isSaving)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        isSaving = true
+                        statusMessage = nil
+
+                        Task {
+                            let didSave = await save(
+                                ProfileUpdateRequest(
+                                    name: trimmedName,
+                                    tier: profile.tier,
+                                    memberCode: profile.memberCode,
+                                    memberSinceYear: profile.memberSinceYear
+                                )
+                            )
+
+                            isSaving = false
+
+                            if didSave {
+                                dismiss()
+                            } else {
+                                statusMessage = "Could not save profile. Check your connection and try again."
+                            }
+                        }
+                    } label: {
+                        if isSaving {
+                            ProgressView()
+                        } else {
+                            Text("Save")
+                        }
+                    }
+                    .disabled(isSaving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.pageBackground(for: colorScheme))
+            .interactiveDismissDisabled(isSaving)
+        }
+    }
+}
+
 #Preview {
-    ContentView()
+    ContentView(
+        configuration: SupabaseConfiguration(
+            projectURL: URL(string: "https://example.supabase.co")!,
+            anonKey: "anon-key",
+            memberID: "preview-member",
+            accessToken: "access-token",
+            memberName: "Emanuil"
+        ),
+        authSession: AuthSession(
+            accessToken: "access-token",
+            refreshToken: "refresh-token",
+            userID: "preview-member",
+            email: "emanuil@example.com",
+            displayName: "Emanuil",
+            expiresAt: Date().addingTimeInterval(3600),
+            needsOnboarding: false
+        ),
+        refreshSession: { _ in
+            AuthSession(
+                accessToken: "access-token",
+                refreshToken: "refresh-token",
+                userID: "preview-member",
+                email: "emanuil@example.com",
+                displayName: "Emanuil",
+                expiresAt: Date().addingTimeInterval(3600),
+                needsOnboarding: false
+            )
+        },
+        signOut: {}
+    )
 }

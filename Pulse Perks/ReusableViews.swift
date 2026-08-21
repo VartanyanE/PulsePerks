@@ -271,7 +271,20 @@ struct SurveyDetailView: View {
     let isCompleted: Bool
     let matchScore: Int
     let matchReason: String
-    let complete: () -> Void
+    let complete: ([SurveyAnswerRequest]) -> Void
+
+    @State private var responses: [String: String] = [:]
+
+    private var answeredCount: Int {
+        survey.questions.filter { question in
+            !(responses[question] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        .count
+    }
+
+    private var canComplete: Bool {
+        isCompleted || answeredCount == survey.questions.count
+    }
 
     var body: some View {
         NavigationStack {
@@ -339,11 +352,27 @@ struct SurveyDetailView: View {
                     )
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Preview")
-                            .font(.headline)
+                        HStack {
+                            Text(isCompleted ? "Responses" : "Answer survey")
+                                .font(.headline)
+
+                            Spacer()
+
+                            Text("\(answeredCount)/\(survey.questions.count)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
 
                         ForEach(Array(survey.questions.enumerated()), id: \.offset) { index, question in
-                            SurveyQuestionPreview(index: index + 1, question: question)
+                            SurveyQuestionField(
+                                index: index + 1,
+                                question: question,
+                                response: Binding(
+                                    get: { responses[question, default: ""] },
+                                    set: { responses[question] = $0 }
+                                ),
+                                isCompleted: isCompleted
+                            )
                         }
                     }
                     .padding(16)
@@ -370,9 +399,12 @@ struct SurveyDetailView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 Button {
-                    complete()
+                    complete(answerRequests)
                 } label: {
-                    Label(isCompleted ? "Points awarded" : "Complete survey", systemImage: isCompleted ? "checkmark.circle.fill" : "checkmark.seal")
+                    Label(
+                        isCompleted ? "Points awarded" : "Submit answers",
+                        systemImage: isCompleted ? "checkmark.circle.fill" : "paperplane.fill"
+                    )
                         .font(.headline)
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
@@ -384,10 +416,40 @@ struct SurveyDetailView: View {
                             in: RoundedRectangle(cornerRadius: 8)
                         )
                 }
-                .disabled(isCompleted)
+                .disabled(!canComplete || isCompleted)
                 .padding(20)
                 .background(.regularMaterial)
             }
+        }
+    }
+
+    private var answerRequests: [SurveyAnswerRequest] {
+        survey.questions.enumerated().map { index, question in
+            SurveyAnswerRequest(
+                questionIndex: index + 1,
+                question: question,
+                answer: (responses[question] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+    }
+}
+
+struct SurveyQuestionField: View {
+    let index: Int
+    let question: String
+    @Binding var response: String
+    let isCompleted: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SurveyQuestionPreview(index: index, question: question)
+
+            TextField("Your answer", text: $response, axis: .vertical)
+                .lineLimit(2...4)
+                .textFieldStyle(.plain)
+                .disabled(isCompleted)
+                .padding(12)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 }
@@ -735,6 +797,39 @@ struct AccountToggleRow: View {
         }
         .toggleStyle(.switch)
         .frame(minHeight: 36)
+    }
+}
+
+struct AccountRetryRow: View {
+    let isLoading: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 28)
+
+                Text("Retry sync")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                if isLoading {
+                    ProgressView()
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(minHeight: 36)
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoading)
     }
 }
 

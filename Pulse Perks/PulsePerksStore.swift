@@ -133,7 +133,7 @@ struct PulsePerksStore {
     }
 }
 
-private extension MemberProfile {
+extension MemberProfile {
     init(response: MemberProfileResponse) {
         self.init(
             id: response.id,
