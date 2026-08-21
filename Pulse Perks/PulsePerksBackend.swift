@@ -12,6 +12,7 @@ protocol PulsePerksBackend {
     func savePerk(id: String, isSaved: Bool) async throws -> MemberActivityResponse
     func redeemPerk(id: String) async throws -> MemberActivityResponse
     func completeSurvey(id: String, responses: [SurveyAnswerRequest]) async throws -> MemberActivityResponse
+    func syncActivity(_ activity: MemberActivityResponse) async throws -> MemberActivityResponse
     func updatePreferences(_ request: PreferencesUpdateRequest) async throws -> MemberActivityResponse
     func updateProfile(_ request: ProfileUpdateRequest) async throws -> MemberProfileResponse
 }
@@ -203,6 +204,10 @@ struct SupabasePulsePerksClient: PulsePerksBackend {
         return try await updateActivity(activity)
     }
 
+    func syncActivity(_ activity: MemberActivityResponse) async throws -> MemberActivityResponse {
+        try await updateActivity(activity.normalized)
+    }
+
     func updateProfile(_ request: ProfileUpdateRequest) async throws -> MemberProfileResponse {
         let profile = MemberProfileRow(
             id: configuration.memberID,
@@ -369,6 +374,10 @@ struct PulsePerksAPIClient: PulsePerksBackend {
 
     func completeSurvey(id: String, responses: [SurveyAnswerRequest]) async throws -> MemberActivityResponse {
         try await send(path: "/v1/me/surveys/\(id)/completion", method: "POST")
+    }
+
+    func syncActivity(_ activity: MemberActivityResponse) async throws -> MemberActivityResponse {
+        try await send(path: "/v1/me/activity", method: "PUT", body: activity.normalized)
     }
 
     func updatePreferences(_ request: PreferencesUpdateRequest) async throws -> MemberActivityResponse {
@@ -880,6 +889,7 @@ struct MemberActivityResponse: Codable, Equatable, Sendable {
     var weeklyDigestEnabled: Bool
     var nearbyPerksEnabled: Bool
     var biometricUnlockEnabled: Bool
+    var serverUpdatedAt: Date? = nil
 
     static let defaultActivity = MemberActivityResponse(
         savedPerkIDs: [],
@@ -899,6 +909,42 @@ struct MemberActivityResponse: Codable, Equatable, Sendable {
         case weeklyDigestEnabled
         case nearbyPerksEnabled
         case biometricUnlockEnabled
+    }
+
+    var normalized: MemberActivityResponse {
+        return MemberActivityResponse(
+            savedPerkIDs: Array(Set(savedPerkIDs)).sorted(),
+            redeemedPerkIDs: Array(Set(redeemedPerkIDs)).sorted(),
+            completedSurveyIDs: Array(Set(completedSurveyIDs)).sorted(),
+            selectedInterestIDs: Array(Set(selectedInterestIDs)).sorted(),
+            weeklyDigestEnabled: weeklyDigestEnabled,
+            nearbyPerksEnabled: nearbyPerksEnabled,
+            biometricUnlockEnabled: biometricUnlockEnabled,
+            serverUpdatedAt: serverUpdatedAt
+        )
+    }
+
+    func mergedWithLocalSnapshot(_ localSnapshot: MemberActivityResponse, localModifiedAt: Date? = nil) -> MemberActivityResponse {
+        let shouldPreferLocalPreferences: Bool
+
+        if let serverUpdatedAt, let localModifiedAt {
+            shouldPreferLocalPreferences = localModifiedAt > serverUpdatedAt
+        } else {
+            shouldPreferLocalPreferences = true
+        }
+
+        return MemberActivityResponse(
+            savedPerkIDs: Array(Set(savedPerkIDs).union(localSnapshot.savedPerkIDs)).sorted(),
+            redeemedPerkIDs: Array(Set(redeemedPerkIDs).union(localSnapshot.redeemedPerkIDs)).sorted(),
+            completedSurveyIDs: Array(Set(completedSurveyIDs).union(localSnapshot.completedSurveyIDs)).sorted(),
+            selectedInterestIDs: shouldPreferLocalPreferences && !localSnapshot.selectedInterestIDs.isEmpty
+                ? Array(Set(localSnapshot.selectedInterestIDs)).sorted()
+                : Array(Set(selectedInterestIDs)).sorted(),
+            weeklyDigestEnabled: shouldPreferLocalPreferences ? localSnapshot.weeklyDigestEnabled : weeklyDigestEnabled,
+            nearbyPerksEnabled: shouldPreferLocalPreferences ? localSnapshot.nearbyPerksEnabled : nearbyPerksEnabled,
+            biometricUnlockEnabled: shouldPreferLocalPreferences ? localSnapshot.biometricUnlockEnabled : biometricUnlockEnabled,
+            serverUpdatedAt: serverUpdatedAt
+        )
     }
 }
 
@@ -1029,6 +1075,7 @@ private struct MemberActivityRow: Codable, Equatable, Sendable {
     let weeklyDigestEnabled: Bool
     let nearbyPerksEnabled: Bool
     let biometricUnlockEnabled: Bool
+    let updatedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case memberID = "member_id"
@@ -1039,6 +1086,7 @@ private struct MemberActivityRow: Codable, Equatable, Sendable {
         case weeklyDigestEnabled = "weekly_digest_enabled"
         case nearbyPerksEnabled = "nearby_perks_enabled"
         case biometricUnlockEnabled = "biometric_unlock_enabled"
+        case updatedAt = "updated_at"
     }
 
     init(memberID: String, activity: MemberActivityResponse) {
@@ -1050,6 +1098,7 @@ private struct MemberActivityRow: Codable, Equatable, Sendable {
         weeklyDigestEnabled = activity.weeklyDigestEnabled
         nearbyPerksEnabled = activity.nearbyPerksEnabled
         biometricUnlockEnabled = activity.biometricUnlockEnabled
+        updatedAt = nil
     }
 
     var response: MemberActivityResponse {
@@ -1060,8 +1109,16 @@ private struct MemberActivityRow: Codable, Equatable, Sendable {
             selectedInterestIDs: selectedInterestIDs,
             weeklyDigestEnabled: weeklyDigestEnabled,
             nearbyPerksEnabled: nearbyPerksEnabled,
-            biometricUnlockEnabled: biometricUnlockEnabled
+            biometricUnlockEnabled: biometricUnlockEnabled,
+            serverUpdatedAt: updatedAt.flatMap(Self.parseDate)
         )
+    }
+
+    nonisolated private static func parseDate(_ value: String) -> Date? {
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        return fractionalFormatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
 }
 

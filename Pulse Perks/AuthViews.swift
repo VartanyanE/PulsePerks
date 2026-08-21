@@ -73,6 +73,7 @@ struct RootView: View {
                 .refreshSession(authSession)
         } catch let error as PulsePerksAPIError where error.isRefreshSessionFailure {
             AuthSessionStore.clear()
+            UserDataCache.clear(userID: authSession.userID)
             self.authSession = nil
             authStatusMessage = SupabaseAuthError.sessionExpired.localizedDescription
             throw SupabaseAuthError.sessionExpired
@@ -87,6 +88,7 @@ struct RootView: View {
         Task {
             try? await SupabaseAuthClient(configuration: configuration).signOut(authSession)
             AuthSessionStore.clear()
+            UserDataCache.clear(userID: authSession.userID)
             self.authSession = nil
         }
     }
