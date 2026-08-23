@@ -4,6 +4,11 @@
 //
 
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
+
+private let maximumSurveyAnswerLength = 500
 
 struct StatBadge: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -139,6 +144,8 @@ struct RecommendedPerkCard: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
+                OfferKindBadge(offerKind: perk.offerKind)
+
                 Text("$\(perk.estimatedSavings) value")
                     .font(.title3.weight(.bold))
 
@@ -167,6 +174,35 @@ struct RecommendedPerkCard: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(AppTheme.stroke(for: colorScheme))
         )
+    }
+}
+
+struct OfferKindBadge: View {
+    let offerKind: OfferKind
+
+    var body: some View {
+        Label(offerKind.title, systemImage: iconName)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(AppTheme.accent)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(AppTheme.accent.opacity(0.10), in: Capsule())
+            .accessibilityLabel(offerKind.title)
+    }
+
+    private var iconName: String {
+        switch offerKind {
+        case .affiliate:
+            "link"
+        case .sponsored:
+            "megaphone"
+        case .promoCode:
+            "qrcode"
+        case .direct:
+            "arrow.up.forward.app"
+        }
     }
 }
 
@@ -269,6 +305,7 @@ struct SurveyDetailView: View {
 
     let survey: Survey
     let isCompleted: Bool
+    let isCompleting: Bool
     let matchScore: Int
     let matchReason: String
     let complete: ([SurveyAnswerRequest]) -> Void
@@ -283,7 +320,11 @@ struct SurveyDetailView: View {
     }
 
     private var canComplete: Bool {
-        isCompleted || answeredCount == survey.questions.count
+        isCompleted || (!isCompleting && answeredCount == survey.questions.count && !hasOversizedResponses)
+    }
+
+    private var hasOversizedResponses: Bool {
+        responses.values.contains { $0.count > maximumSurveyAnswerLength }
     }
 
     var body: some View {
@@ -371,7 +412,8 @@ struct SurveyDetailView: View {
                                     get: { responses[question, default: ""] },
                                     set: { responses[question] = $0 }
                                 ),
-                                isCompleted: isCompleted
+                                isCompleted: isCompleted,
+                                maximumLength: maximumSurveyAnswerLength
                             )
                         }
                     }
@@ -401,22 +443,28 @@ struct SurveyDetailView: View {
                 Button {
                     complete(answerRequests)
                 } label: {
-                    Label(
-                        isCompleted ? "Points awarded" : "Submit answers",
-                        systemImage: isCompleted ? "checkmark.circle.fill" : "paperplane.fill"
+                    HStack {
+                        if isCompleting {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Image(systemName: isCompleted ? "checkmark.circle.fill" : "paperplane.fill")
+                        }
+
+                        Text(isCompleted ? "Points awarded" : isCompleting ? "Submitting" : "Submit answers")
+                    }
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(
+                        isCompleted
+                            ? Color.gray
+                            : AppTheme.accent,
+                        in: RoundedRectangle(cornerRadius: 8)
                     )
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(
-                            isCompleted
-                                ? Color.gray
-                                : AppTheme.accent,
-                            in: RoundedRectangle(cornerRadius: 8)
-                        )
                 }
-                .disabled(!canComplete || isCompleted)
+                .disabled(!canComplete || isCompleted || isCompleting)
                 .padding(20)
                 .background(.regularMaterial)
             }
@@ -439,6 +487,11 @@ struct SurveyQuestionField: View {
     let question: String
     @Binding var response: String
     let isCompleted: Bool
+    let maximumLength: Int
+
+    private var isOverLimit: Bool {
+        response.count > maximumLength
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -450,6 +503,17 @@ struct SurveyQuestionField: View {
                 .disabled(isCompleted)
                 .padding(12)
                 .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+
+            HStack {
+                Text(isOverLimit ? "Answer is too long" : "\(maximumLength - response.count) characters remaining")
+                    .foregroundStyle(isOverLimit ? Color(red: 0.73, green: 0.26, blue: 0.18) : .secondary)
+
+                Spacer()
+
+                Text("\(response.count)/\(maximumLength)")
+                    .foregroundStyle(isOverLimit ? Color(red: 0.73, green: 0.26, blue: 0.18) : .secondary)
+            }
+            .font(.caption.weight(.semibold))
         }
     }
 }
@@ -526,9 +590,9 @@ struct PerkRow: View {
 
                     Spacer()
 
-                    Text(isRedeemed ? "Redeemed" : perk.category)
+                    Text(statusTitle)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(isRedeemed ? AppTheme.accent : .secondary)
+                        .foregroundStyle(statusColor)
                 }
 
                 Text(perk.description)
@@ -538,7 +602,7 @@ struct PerkRow: View {
 
                 Text(perk.expiration)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(perk.isExpired ? .secondary : AppTheme.accent)
 
                 HStack(spacing: 10) {
                     Label(perk.distance, systemImage: "location")
@@ -546,6 +610,8 @@ struct PerkRow: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+                OfferKindBadge(offerKind: perk.offerKind)
             }
 
             if isSaved {
@@ -562,6 +628,22 @@ struct PerkRow: View {
                 .stroke(AppTheme.stroke(for: colorScheme))
         )
     }
+
+    private var statusTitle: String {
+        if perk.isExpired {
+            return "Expired"
+        }
+
+        return isRedeemed ? "Redeemed" : perk.category
+    }
+
+    private var statusColor: Color {
+        if perk.isExpired {
+            return .secondary
+        }
+
+        return isRedeemed ? AppTheme.accent : .secondary
+    }
 }
 
 struct PerkDetailView: View {
@@ -571,8 +653,13 @@ struct PerkDetailView: View {
     let perk: Perk
     let isRedeemed: Bool
     let isSaved: Bool
+    let isRedeeming: Bool
+    let isSaving: Bool
     let redeem: () -> Void
     let toggleSave: () -> Void
+    let openOffer: () -> Void
+
+    @State private var copiedCodeMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -602,13 +689,24 @@ struct PerkDetailView: View {
                         RedeemedConfirmationView(perk: perk)
                     }
 
+                    if perk.isExpired {
+                        ExpiredOfferNotice()
+                    } else {
+                        RedemptionCodeCard(
+                            code: perk.memberCode,
+                            instructions: perk.redemptionInstructions,
+                            statusMessage: copiedCodeMessage
+                        ) {
+                            copyMemberCode()
+                        }
+                    }
+
                     VStack(alignment: .leading, spacing: 12) {
                         DetailRow(iconName: "tag", title: "Category", value: perk.category)
                         DetailRow(iconName: "calendar", title: "Availability", value: perk.expiration)
                         DetailRow(iconName: "location", title: "Distance", value: perk.distance)
                         DetailRow(iconName: "dollarsign.circle", title: "Estimated value", value: "$\(perk.estimatedSavings)")
-                        DetailRow(iconName: "qrcode", title: "Member code", value: perk.memberCode)
-                        DetailRow(iconName: "checkmark.seal", title: "How to use", value: perk.redemptionInstructions)
+                        DetailRow(iconName: "megaphone", title: "Offer type", value: perk.offerKind.title)
                         DetailRow(iconName: "doc.text", title: "Terms", value: perk.terms)
                     }
                     .padding(16)
@@ -630,39 +728,192 @@ struct PerkDetailView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                HStack(spacing: 12) {
-                    Button {
-                        toggleSave()
-                    } label: {
-                        Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                VStack(spacing: 12) {
+                    if perk.offerURL != nil {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Button {
+                                openOffer()
+                            } label: {
+                                Label("Open offer", systemImage: "arrow.up.forward.app")
+                                    .font(.headline)
+                                    .foregroundStyle(perk.isExpired ? .secondary : AppTheme.accent)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 48)
+                                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                            }
+                            .disabled(perk.isExpired)
+
+                            Text(perk.isExpired ? "This partner offer has expired and can no longer be opened from Pulse Perks." : perk.offerKind.disclosure)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    HStack(spacing: 12) {
+                        Button {
+                            toggleSave()
+                        } label: {
+                            Group {
+                                if isSaving {
+                                    ProgressView()
+                                        .tint(AppTheme.accent)
+                                } else {
+                                    Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                                }
+                            }
                             .font(.headline)
                             .foregroundStyle(AppTheme.accent)
                             .frame(width: 52, height: 52)
                             .background(.background, in: RoundedRectangle(cornerRadius: 8))
-                    }
-                    .accessibilityLabel(isSaved ? "Remove saved perk" : "Save perk")
+                        }
+                        .accessibilityLabel(isSaved ? "Remove saved perk" : "Save perk")
+                        .disabled(isSaving)
 
-                    Button {
-                        redeem()
-                    } label: {
-                        Label(isRedeemed ? "Redeemed" : "Redeem perk", systemImage: isRedeemed ? "checkmark.circle.fill" : "ticket")
+                        Button {
+                            redeem()
+                        } label: {
+                            HStack {
+                                if isRedeeming {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: isRedeemed ? "checkmark.circle.fill" : "ticket")
+                                }
+
+                                Text(redeemButtonTitle)
+                            }
                             .font(.headline)
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .frame(height: 52)
                             .background(
-                                isRedeemed
+                                isRedeemed || perk.isExpired
                                     ? Color.gray
                                     : AppTheme.accent,
                                 in: RoundedRectangle(cornerRadius: 8)
                             )
+                        }
+                        .disabled(isRedeemed || isRedeeming || perk.isExpired)
                     }
-                    .disabled(isRedeemed)
                 }
                 .padding(20)
                 .background(.regularMaterial)
             }
         }
+    }
+
+    private func copyMemberCode() {
+        #if canImport(UIKit)
+        UIPasteboard.general.string = perk.memberCode
+        copiedCodeMessage = "Code copied"
+        #else
+        copiedCodeMessage = "Copy is unavailable on this device"
+        #endif
+    }
+
+    private var redeemButtonTitle: String {
+        if perk.isExpired {
+            return "Expired"
+        }
+
+        return isRedeemed ? "Redeemed" : isRedeeming ? "Redeeming" : "Redeem perk"
+    }
+}
+
+struct ExpiredOfferNotice: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Offer expired")
+                    .font(.headline)
+
+                Text("This perk is no longer available. Check Discover for current partner offers.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+}
+
+struct RedemptionCodeCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let code: String
+    let instructions: String
+    let statusMessage: String?
+    let copyCode: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "qrcode")
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 34, height: 34)
+                    .background(AppTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Redemption code")
+                        .font(.headline)
+
+                    Text(instructions)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+            HStack(spacing: 10) {
+                Text(code)
+                    .font(.system(.title3, design: .monospaced).weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .frame(height: 46)
+                    .background(AppTheme.elevatedBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
+
+                Button {
+                    copyCode()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.headline)
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 46, height: 46)
+                        .background(AppTheme.elevatedBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
+                }
+                .accessibilityLabel("Copy redemption code")
+            }
+
+            if let statusMessage {
+                Label(statusMessage, systemImage: "checkmark.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+            }
+        }
+        .padding(16)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
     }
 }
 
@@ -695,6 +946,55 @@ struct ActivityRow: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(AppTheme.stroke(for: colorScheme))
         )
+    }
+}
+
+struct OfferClickActivityRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let entry: OfferClickHistoryEntry
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: iconName)
+                .font(.title3)
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.partner)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text("\(entry.perkTitle) opened \(entry.clickedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer()
+
+            OfferKindBadge(offerKind: entry.offerKind)
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+
+    private var iconName: String {
+        switch entry.offerKind {
+        case .affiliate:
+            "link.circle.fill"
+        case .sponsored:
+            "megaphone.fill"
+        case .promoCode:
+            "qrcode"
+        case .direct:
+            "arrow.up.forward.circle.fill"
+        }
     }
 }
 
@@ -833,6 +1133,55 @@ struct AccountRetryRow: View {
     }
 }
 
+struct AccountStatusRow: View {
+    let iconName: String
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: iconName)
+                .font(.headline)
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 28)
+
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct AccountInfoActionRow: View {
+    let iconName: String
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: iconName)
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.accent)
+                    .frame(width: 28)
+
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minHeight: 36)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct AccountActionRow: View {
     let iconName: String
     let title: String
@@ -855,6 +1204,121 @@ struct AccountActionRow: View {
             .frame(minHeight: 36)
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct AffiliateDisclosureView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+
+                    DisclosureInfoCard(
+                        iconName: "link",
+                        title: "Partner links",
+                        message: "Some offers open a partner website or app. Pulse Perks may earn money when you click, sign up, buy, or redeem through those partner offers."
+                    )
+
+                    DisclosureInfoCard(
+                        iconName: "megaphone",
+                        title: "Sponsored placements",
+                        message: "Some offers may be paid placements. Sponsored status does not change the member price shown in Pulse Perks."
+                    )
+
+                    DisclosureInfoCard(
+                        iconName: "chart.line.uptrend.xyaxis",
+                        title: "Click tracking",
+                        message: "Pulse Perks records offer clicks to measure which partners and categories are useful. Your recent opened offers also appear in Wallet for convenience."
+                    )
+
+                    DisclosureInfoCard(
+                        iconName: "checkmark.seal",
+                        title: "Offer terms",
+                        message: "Partner terms, eligibility, prices, and availability can change. Always review the partner checkout page before completing a purchase."
+                    )
+                }
+                .padding(20)
+            }
+            .background(AppTheme.pageBackground(for: colorScheme))
+            .navigationTitle("Disclosure")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: "megaphone.fill")
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+
+            Text("Affiliate disclosure")
+                .font(.largeTitle.weight(.bold))
+
+            Text("Pulse Perks connects members with partner offers. This page explains how those links may support the app.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(
+            LinearGradient(
+                colors: [
+                    AppTheme.heroStart(for: colorScheme),
+                    AppTheme.heroEnd(for: colorScheme)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+}
+
+private struct DisclosureInfoCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let iconName: String
+    let title: String
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: iconName)
+                .font(.headline)
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 34, height: 34)
+                .background(AppTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.headline)
+
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
     }
 }
 
@@ -895,29 +1359,43 @@ struct InterestChip: View {
 
 struct NotificationsView: View {
     let notifications: [PulseNotification]
+    let selectNotification: (PulseNotification) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List(notifications) { notification in
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: notification.iconName)
-                        .font(.headline)
-                        .foregroundStyle(AppTheme.accent)
-                        .frame(width: 30, height: 30)
-                        .background(AppTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(notification.title)
+                Button {
+                    selectNotification(notification)
+                } label: {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: notification.iconName)
                             .font(.headline)
+                            .foregroundStyle(AppTheme.accent)
+                            .frame(width: 30, height: 30)
+                            .background(AppTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
 
-                        Text(notification.message)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(notification.title)
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+
+                            Text(notification.message)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            Label(notification.actionTitle, systemImage: "arrow.right.circle")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AppTheme.accent)
+                                .padding(.top, 2)
+                        }
+
+                        Spacer()
                     }
+                    .padding(.vertical, 6)
                 }
-                .padding(.vertical, 6)
+                .buttonStyle(.plain)
             }
             .navigationTitle("Notifications")
             .toolbar {

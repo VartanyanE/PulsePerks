@@ -18,6 +18,9 @@ struct PulsePerksStore {
     let nextRewardPoints: Int
     let dailySurveyGoal: Int
 
+    private static let minimumRewardGoal = 1
+    private static let minimumSurveyGoal = 1
+
     static let demo = PulsePerksStore(
         memberProfile: .demo,
         categories: ["All", "Food", "Fitness", "Travel", "Retail"],
@@ -31,6 +34,7 @@ struct PulsePerksStore {
         dailySurveyGoal: 300
     )
 
+    @MainActor
     init(response: PulsePerksBootstrapResponse) {
         memberProfile = MemberProfile(response: response.member)
         categories = response.categories
@@ -57,21 +61,22 @@ struct PulsePerksStore {
         dailySurveyGoal: Int
     ) {
         self.memberProfile = memberProfile
-        self.categories = categories
+        self.categories = categories.contains("All") ? categories : ["All"] + categories
         self.perks = perks
         self.collections = collections
         self.surveys = surveys
         self.interests = interests
-        self.basePoints = basePoints
-        self.pointsPerRedemption = pointsPerRedemption
-        self.nextRewardPoints = nextRewardPoints
-        self.dailySurveyGoal = dailySurveyGoal
+        self.basePoints = max(basePoints, 0)
+        self.pointsPerRedemption = max(pointsPerRedemption, 0)
+        self.nextRewardPoints = max(nextRewardPoints, Self.minimumRewardGoal)
+        self.dailySurveyGoal = max(dailySurveyGoal, Self.minimumSurveyGoal)
     }
 
     func filteredPerks(category: String, searchText: String, sort: PerkSort) -> [Perk] {
+        let activePerks = perks.filter { !$0.isExpired }
         let categoryMatches = category == "All"
-            ? perks
-            : perks.filter { $0.category == category }
+            ? activePerks
+            : activePerks.filter { $0.category == category }
 
         let searchMatches: [Perk]
 
@@ -120,6 +125,14 @@ struct PulsePerksStore {
         max(nextRewardPoints - memberPoints(redeemedPerkIDs: redeemedPerkIDs, completedSurveyIDs: completedSurveyIDs), 0)
     }
 
+    func rewardProgress(redeemedPerkIDs: Set<String>, completedSurveyIDs: Set<String>) -> Double {
+        min(Double(memberPoints(redeemedPerkIDs: redeemedPerkIDs, completedSurveyIDs: completedSurveyIDs)) / Double(nextRewardPoints), 1)
+    }
+
+    func dailySurveyGoalProgress(completedIDs: Set<String>) -> Double {
+        min(Double(surveyPoints(completedIDs: completedIDs)) / Double(dailySurveyGoal), 1)
+    }
+
     func savedValue(redeemedPerkIDs: Set<String>) -> Int {
         redeemedPerks(for: redeemedPerkIDs).reduce(0) { total, perk in
             total + perk.estimatedSavings
@@ -128,7 +141,7 @@ struct PulsePerksStore {
 
     func recommendedPerks(excluding redeemedIDs: Set<String>) -> [Perk] {
         perks
-            .filter { !redeemedIDs.contains($0.id) }
+            .filter { !redeemedIDs.contains($0.id) && !$0.isExpired }
             .sorted(using: .bestValue)
     }
 }
@@ -191,6 +204,8 @@ private extension PerkCollection {
 
 private extension Perk {
     init(response: PerkResponse) {
+        let offerURL = URL.supportedOfferURL(from: response.offerURL)
+
         self.init(
             id: response.id,
             title: response.title,
@@ -206,6 +221,8 @@ private extension Perk {
             terms: response.terms,
             estimatedSavings: response.estimatedSavings,
             memberCode: response.memberCode,
+            offerURL: offerURL,
+            offerKind: response.offerKind ?? (offerURL == nil ? .promoCode : .affiliate),
             iconName: response.iconName,
             tint: Color(hex: response.tintHex)
         )

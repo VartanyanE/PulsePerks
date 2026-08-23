@@ -20,8 +20,12 @@ struct RootView: View {
                         configuration: configuration.authenticated(with: authSession),
                         authSession: authSession
                     ) { completedSession in
-                        AuthSessionStore.save(completedSession)
-                        self.authSession = completedSession
+                        do {
+                            try AuthSessionStore.save(completedSession)
+                            self.authSession = completedSession
+                        } catch {
+                            authStatusMessage = error.localizedDescription
+                        }
                     } signOut: {
                         signOut(configuration: configuration, authSession: authSession)
                     }
@@ -36,11 +40,17 @@ struct RootView: View {
                         signOut(configuration: configuration, authSession: authSession)
                     }
                 }
+            } else if configuration == nil {
+                ConfigurationUnavailableView()
             } else {
                 AuthView(configuration: configuration, initialStatusMessage: authStatusMessage) { session in
-                    AuthSessionStore.save(session)
-                    authStatusMessage = nil
-                    authSession = session
+                    do {
+                        try AuthSessionStore.save(session)
+                        authStatusMessage = nil
+                        authSession = session
+                    } catch {
+                        authStatusMessage = error.localizedDescription
+                    }
                 }
             }
         }
@@ -72,25 +82,98 @@ struct RootView: View {
             refreshedSession = try await SupabaseAuthClient(configuration: configuration)
                 .refreshSession(authSession)
         } catch let error as PulsePerksAPIError where error.isRefreshSessionFailure {
-            AuthSessionStore.clear()
-            UserDataCache.clear(userID: authSession.userID)
-            self.authSession = nil
+            clearLocalSession(for: authSession)
             authStatusMessage = SupabaseAuthError.sessionExpired.localizedDescription
             throw SupabaseAuthError.sessionExpired
         }
 
-        AuthSessionStore.save(refreshedSession)
+        try AuthSessionStore.save(refreshedSession)
         self.authSession = refreshedSession
         return refreshedSession
     }
 
     private func signOut(configuration: SupabaseConfiguration, authSession: AuthSession) {
+        clearLocalSession(for: authSession)
+
         Task {
             try? await SupabaseAuthClient(configuration: configuration).signOut(authSession)
-            AuthSessionStore.clear()
-            UserDataCache.clear(userID: authSession.userID)
-            self.authSession = nil
         }
+    }
+
+    private func clearLocalSession(for authSession: AuthSession) {
+        AuthSessionStore.clear()
+        UserLocalDataStore.clearAll(userID: authSession.userID)
+        authStatusMessage = nil
+        self.authSession = nil
+    }
+}
+
+private struct ConfigurationUnavailableView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 22) {
+                Spacer(minLength: 24)
+
+                header
+                requirements
+
+                Spacer(minLength: 24)
+            }
+            .padding(20)
+            .background(AppTheme.pageBackground(for: colorScheme))
+            .navigationTitle("Setup Required")
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: "wrench.and.screwdriver.fill")
+                .font(.system(size: 48, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+
+            Text("Configure Supabase")
+                .font(.largeTitle.weight(.bold))
+
+            Text("Pulse Perks needs backend configuration before members can sign in or sync rewards.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(
+            LinearGradient(
+                colors: [
+                    AppTheme.heroStart(for: colorScheme),
+                    AppTheme.heroEnd(for: colorScheme)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+
+    private var requirements: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Set SUPABASE_URL", systemImage: "link")
+            Label("Set SUPABASE_ANON_KEY", systemImage: "key")
+            Label("Optionally set SUPABASE_MEMBER_ID for local demo data", systemImage: "person.crop.circle")
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.primary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
     }
 }
 
@@ -240,8 +323,7 @@ private struct OnboardingView: View {
                     PreferencesUpdateRequest(
                         selectedInterestIDs: Array(selectedInterestIDs).sorted(),
                         weeklyDigestEnabled: true,
-                        nearbyPerksEnabled: true,
-                        biometricUnlockEnabled: false
+                        nearbyPerksEnabled: true
                     )
                 )
                 didComplete(authSession.completedOnboarding())
@@ -552,6 +634,20 @@ private extension AuthSession {
     }
 }
 
+private enum AuthSessionStoreError: LocalizedError {
+    case encodingFailed(Error)
+    case keychainSaveFailed(OSStatus)
+
+    var errorDescription: String? {
+        switch self {
+        case let .encodingFailed(error):
+            "Could not prepare your session for secure storage: \(error.localizedDescription)"
+        case let .keychainSaveFailed(status):
+            "Could not save your session securely. Keychain returned status \(status)."
+        }
+    }
+}
+
 private enum AuthSessionStore {
     private static let account = "supabaseAuthSession"
     private static let legacyKey = "supabaseAuthSession"
@@ -567,27 +663,54 @@ private enum AuthSessionStore {
             return nil
         }
 
-        save(legacySession)
-        UserDefaults.standard.removeObject(forKey: legacyKey)
+        if (try? save(legacySession)) != nil {
+            UserDefaults.standard.removeObject(forKey: legacyKey)
+        }
+
         return legacySession
     }
 
-    static func save(_ session: AuthSession) {
-        guard let data = try? JSONEncoder().encode(session) else {
-            return
+    static func save(_ session: AuthSession) throws {
+        let data: Data
+
+        do {
+            data = try JSONEncoder().encode(session)
+        } catch {
+            throw AuthSessionStoreError.encodingFailed(error)
         }
 
-        clear()
-
-        let query: [String: Any] = [
+        let lookupQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecAttrAccount as String: account
+        ]
+
+        let updateAttributes: [String: Any] = [
             kSecValueData as String: data
         ]
 
-        SecItemAdd(query as CFDictionary, nil)
+        let updateStatus = SecItemUpdate(lookupQuery as CFDictionary, updateAttributes as CFDictionary)
+
+        if updateStatus == errSecSuccess {
+            UserDefaults.standard.removeObject(forKey: legacyKey)
+            return
+        }
+
+        guard updateStatus == errSecItemNotFound else {
+            throw AuthSessionStoreError.keychainSaveFailed(updateStatus)
+        }
+
+        var addQuery = lookupQuery
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        addQuery[kSecValueData as String] = data
+
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+
+        guard addStatus == errSecSuccess else {
+            throw AuthSessionStoreError.keychainSaveFailed(addStatus)
+        }
+
+        UserDefaults.standard.removeObject(forKey: legacyKey)
     }
 
     static func clear() {

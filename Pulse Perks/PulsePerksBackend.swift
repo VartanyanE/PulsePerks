@@ -6,11 +6,13 @@
 import Foundation
 
 private let backendRequestTimeout: TimeInterval = 20
+private let maximumUserFacingBackendMessageLength = 240
 
 protocol PulsePerksBackend {
     func fetchBootstrap() async throws -> PulsePerksBootstrapResponse
     func savePerk(id: String, isSaved: Bool) async throws -> MemberActivityResponse
     func redeemPerk(id: String) async throws -> MemberActivityResponse
+    func trackOfferClick(perkID: String, offerURL: URL) async throws
     func completeSurvey(id: String, responses: [SurveyAnswerRequest]) async throws -> MemberActivityResponse
     func syncActivity(_ activity: MemberActivityResponse) async throws -> MemberActivityResponse
     func updatePreferences(_ request: PreferencesUpdateRequest) async throws -> MemberActivityResponse
@@ -149,6 +151,23 @@ struct SupabasePulsePerksClient: PulsePerksBackend {
         return try await updateActivity(activity)
     }
 
+    func trackOfferClick(perkID: String, offerURL: URL) async throws {
+        let row = OfferClickRow(
+            memberID: configuration.memberID,
+            perkID: perkID,
+            offerURL: offerURL.absoluteString,
+            clickedAt: ISO8601DateFormatter().string(from: Date())
+        )
+
+        let _: EmptyResponse = try await send(
+            table: "offer_clicks",
+            method: "POST",
+            queryItems: [],
+            body: row,
+            prefer: "return=minimal"
+        )
+    }
+
     private func saveRedemption(perkID: String) async throws {
         let row = PerkRedemptionRow(
             memberID: configuration.memberID,
@@ -200,7 +219,6 @@ struct SupabasePulsePerksClient: PulsePerksBackend {
         activity.selectedInterestIDs = request.selectedInterestIDs
         activity.weeklyDigestEnabled = request.weeklyDigestEnabled
         activity.nearbyPerksEnabled = request.nearbyPerksEnabled
-        activity.biometricUnlockEnabled = request.biometricUnlockEnabled
         return try await updateActivity(activity)
     }
 
@@ -340,15 +358,7 @@ struct SupabasePulsePerksClient: PulsePerksBackend {
             throw PulsePerksAPIError.requestFailed(statusCode: httpResponse.statusCode, data: data)
         }
 
-        if Response.self == EmptyResponse.self, data.isEmpty {
-            return EmptyResponse() as! Response
-        }
-
-        do {
-            return try JSONDecoder.supabase.decode(Response.self, from: data)
-        } catch {
-            throw PulsePerksAPIError.decodingFailed(error)
-        }
+        return try decodeBackendResponse(Response.self, from: data, using: .supabase)
     }
 }
 
@@ -370,6 +380,14 @@ struct PulsePerksAPIClient: PulsePerksBackend {
 
     func redeemPerk(id: String) async throws -> MemberActivityResponse {
         try await send(path: "/v1/me/perks/\(id)/redemptions", method: "POST")
+    }
+
+    func trackOfferClick(perkID: String, offerURL: URL) async throws {
+        let _: EmptyResponse = try await send(
+            path: "/v1/me/perks/\(perkID)/offer-clicks",
+            method: "POST",
+            body: OfferClickRequest(offerURL: offerURL.absoluteString)
+        )
     }
 
     func completeSurvey(id: String, responses: [SurveyAnswerRequest]) async throws -> MemberActivityResponse {
@@ -436,11 +454,7 @@ struct PulsePerksAPIClient: PulsePerksBackend {
             throw PulsePerksAPIError.requestFailed(statusCode: httpResponse.statusCode, data: data)
         }
 
-        do {
-            return try JSONDecoder.pulsePerks.decode(Response.self, from: data)
-        } catch {
-            throw PulsePerksAPIError.decodingFailed(error)
-        }
+        return try decodeBackendResponse(Response.self, from: data, using: .pulsePerks)
     }
 }
 
@@ -579,15 +593,28 @@ struct SupabaseAuthClient {
             throw PulsePerksAPIError.requestFailed(statusCode: httpResponse.statusCode, data: data)
         }
 
-        if Response.self == EmptyResponse.self, data.isEmpty {
-            return EmptyResponse() as! Response
+        return try decodeBackendResponse(Response.self, from: data, using: .supabase)
+    }
+}
+
+private func decodeBackendResponse<Response: Decodable>(
+    _ responseType: Response.Type,
+    from data: Data,
+    using decoder: JSONDecoder
+) throws -> Response {
+    if data.isEmpty {
+        guard let emptyResponseType = responseType as? EmptyBackendResponse.Type,
+              let response = emptyResponseType.init() as? Response else {
+            throw PulsePerksAPIError.emptyResponse
         }
 
-        do {
-            return try JSONDecoder.supabase.decode(Response.self, from: data)
-        } catch {
-            throw PulsePerksAPIError.decodingFailed(error)
-        }
+        return response
+    }
+
+    do {
+        return try decoder.decode(Response.self, from: data)
+    } catch {
+        throw PulsePerksAPIError.decodingFailed(error)
     }
 }
 
@@ -626,6 +653,15 @@ struct SupabaseConfiguration: Equatable, Sendable {
             return infoPlistConfiguration
         }
 
+        #if DEBUG
+        return debugSecretsConfiguration
+        #else
+        return nil
+        #endif
+    }
+
+    #if DEBUG
+    private static var debugSecretsConfiguration: SupabaseConfiguration? {
         guard !SupabaseSecrets.projectURL.isEmpty,
               !SupabaseSecrets.anonKey.isEmpty,
               !SupabaseSecrets.projectURL.contains("YOUR_SUPABASE_URL"),
@@ -642,6 +678,7 @@ struct SupabaseConfiguration: Equatable, Sendable {
             memberName: "Emanuil"
         )
     }
+    #endif
 
     func authenticated(with session: AuthSession) -> SupabaseConfiguration {
         SupabaseConfiguration(
@@ -704,13 +741,14 @@ struct AuthSession: Codable, Equatable, Sendable {
 enum PulsePerksAPIError: Error, Equatable {
     case invalidURL
     case invalidResponse
+    case emptyResponse
     case requestFailed(statusCode: Int, data: Data)
     case decodingFailed(Error)
     case networkFailed(Error)
 
     static func == (lhs: PulsePerksAPIError, rhs: PulsePerksAPIError) -> Bool {
         switch (lhs, rhs) {
-        case (.invalidURL, .invalidURL), (.invalidResponse, .invalidResponse):
+        case (.invalidURL, .invalidURL), (.invalidResponse, .invalidResponse), (.emptyResponse, .emptyResponse):
             true
         case let (.requestFailed(lhsStatus, lhsData), .requestFailed(rhsStatus, rhsData)):
             lhsStatus == rhsStatus && lhsData == rhsData
@@ -729,12 +767,14 @@ extension PulsePerksAPIError: LocalizedError {
             "Invalid backend URL"
         case .invalidResponse:
             "Backend returned an invalid response"
+        case .emptyResponse:
+            "Backend returned an empty response"
         case let .requestFailed(statusCode, data):
             if let message = SupabaseErrorMessage(data: data)?.userFacingMessage(statusCode: statusCode) {
                 message
             } else if statusCode == 429 {
                 "Supabase rate limit reached. Wait a few minutes, then try again."
-            } else if let message = String(data: data, encoding: .utf8), !message.isEmpty {
+            } else if let message = sanitizedBackendMessage(from: data), !message.isEmpty {
                 "Backend request failed (\(statusCode)): \(message)"
             } else {
                 "Backend request failed (\(statusCode))"
@@ -767,6 +807,29 @@ extension PulsePerksAPIError {
 
         return statusCode == 400 || statusCode == 401 || statusCode == 403
     }
+
+    var isTransientFailure: Bool {
+        switch self {
+        case let .requestFailed(statusCode, _):
+            return statusCode == 408 || statusCode == 429 || 500..<600 ~= statusCode
+        case let .networkFailed(error):
+            guard let urlError = error as? URLError else {
+                return true
+            }
+
+            return [
+                .cannotFindHost,
+                .cannotConnectToHost,
+                .dnsLookupFailed,
+                .internationalRoamingOff,
+                .networkConnectionLost,
+                .notConnectedToInternet,
+                .timedOut
+            ].contains(urlError.code)
+        case .invalidURL, .invalidResponse, .emptyResponse, .decodingFailed:
+            return false
+        }
+    }
 }
 
 private struct SupabaseErrorMessage: Decodable, Sendable {
@@ -798,12 +861,40 @@ private struct SupabaseErrorMessage: Decodable, Sendable {
         }
 
         if statusCode == 429 {
-            return rawMessage.map { "Supabase rate limit reached: \($0)" }
+            return rawMessage.map { "Supabase rate limit reached: \(sanitizedBackendMessage($0))" }
                 ?? "Supabase rate limit reached. Wait a few minutes, then try again."
         }
 
-        return rawMessage.map { "Backend request failed (\(statusCode)): \($0)" }
+        return rawMessage.map { "Backend request failed (\(statusCode)): \(sanitizedBackendMessage($0))" }
     }
+}
+
+private func sanitizedBackendMessage(from data: Data) -> String? {
+    guard let message = String(data: data, encoding: .utf8) else {
+        return nil
+    }
+
+    return sanitizedBackendMessage(message)
+}
+
+private func sanitizedBackendMessage(_ message: String) -> String {
+    let collapsedMessage = message
+        .replacingOccurrences(of: "\n", with: " ")
+        .replacingOccurrences(of: "\r", with: " ")
+        .replacingOccurrences(of: "\t", with: " ")
+        .split(separator: " ")
+        .joined(separator: " ")
+
+    guard collapsedMessage.count > maximumUserFacingBackendMessageLength else {
+        return collapsedMessage
+    }
+
+    let endIndex = collapsedMessage.index(
+        collapsedMessage.startIndex,
+        offsetBy: maximumUserFacingBackendMessageLength
+    )
+
+    return "\(collapsedMessage[..<endIndex])..."
 }
 
 enum SupabaseError: Error, Equatable {
@@ -888,7 +979,6 @@ struct MemberActivityResponse: Codable, Equatable, Sendable {
     var selectedInterestIDs: [String]
     var weeklyDigestEnabled: Bool
     var nearbyPerksEnabled: Bool
-    var biometricUnlockEnabled: Bool
     var serverUpdatedAt: Date? = nil
 
     static let defaultActivity = MemberActivityResponse(
@@ -897,8 +987,7 @@ struct MemberActivityResponse: Codable, Equatable, Sendable {
         completedSurveyIDs: [],
         selectedInterestIDs: ["shopping", "wellness"],
         weeklyDigestEnabled: true,
-        nearbyPerksEnabled: true,
-        biometricUnlockEnabled: false
+        nearbyPerksEnabled: true
     )
 
     enum CodingKeys: String, CodingKey {
@@ -908,7 +997,6 @@ struct MemberActivityResponse: Codable, Equatable, Sendable {
         case selectedInterestIDs = "selectedInterestIDs"
         case weeklyDigestEnabled
         case nearbyPerksEnabled
-        case biometricUnlockEnabled
     }
 
     var normalized: MemberActivityResponse {
@@ -919,7 +1007,6 @@ struct MemberActivityResponse: Codable, Equatable, Sendable {
             selectedInterestIDs: Array(Set(selectedInterestIDs)).sorted(),
             weeklyDigestEnabled: weeklyDigestEnabled,
             nearbyPerksEnabled: nearbyPerksEnabled,
-            biometricUnlockEnabled: biometricUnlockEnabled,
             serverUpdatedAt: serverUpdatedAt
         )
     }
@@ -942,7 +1029,6 @@ struct MemberActivityResponse: Codable, Equatable, Sendable {
                 : Array(Set(selectedInterestIDs)).sorted(),
             weeklyDigestEnabled: shouldPreferLocalPreferences ? localSnapshot.weeklyDigestEnabled : weeklyDigestEnabled,
             nearbyPerksEnabled: shouldPreferLocalPreferences ? localSnapshot.nearbyPerksEnabled : nearbyPerksEnabled,
-            biometricUnlockEnabled: shouldPreferLocalPreferences ? localSnapshot.biometricUnlockEnabled : biometricUnlockEnabled,
             serverUpdatedAt: serverUpdatedAt
         )
     }
@@ -963,6 +1049,8 @@ struct PerkResponse: Codable, Equatable, Sendable {
     let terms: String
     let estimatedSavings: Int
     let memberCode: String
+    let offerURL: String?
+    let offerKind: OfferKind?
     let iconName: String
     let tintHex: String
 
@@ -981,6 +1069,8 @@ struct PerkResponse: Codable, Equatable, Sendable {
         case terms
         case estimatedSavings = "estimated_savings"
         case memberCode = "member_code"
+        case offerURL = "offer_url"
+        case offerKind = "offer_kind"
         case iconName = "icon_name"
         case tintHex = "tint_hex"
     }
@@ -1074,7 +1164,6 @@ private struct MemberActivityRow: Codable, Equatable, Sendable {
     let selectedInterestIDs: [String]
     let weeklyDigestEnabled: Bool
     let nearbyPerksEnabled: Bool
-    let biometricUnlockEnabled: Bool
     let updatedAt: String?
 
     enum CodingKeys: String, CodingKey {
@@ -1085,7 +1174,6 @@ private struct MemberActivityRow: Codable, Equatable, Sendable {
         case selectedInterestIDs = "selected_interest_ids"
         case weeklyDigestEnabled = "weekly_digest_enabled"
         case nearbyPerksEnabled = "nearby_perks_enabled"
-        case biometricUnlockEnabled = "biometric_unlock_enabled"
         case updatedAt = "updated_at"
     }
 
@@ -1097,7 +1185,6 @@ private struct MemberActivityRow: Codable, Equatable, Sendable {
         selectedInterestIDs = activity.selectedInterestIDs
         weeklyDigestEnabled = activity.weeklyDigestEnabled
         nearbyPerksEnabled = activity.nearbyPerksEnabled
-        biometricUnlockEnabled = activity.biometricUnlockEnabled
         updatedAt = nil
     }
 
@@ -1109,7 +1196,6 @@ private struct MemberActivityRow: Codable, Equatable, Sendable {
             selectedInterestIDs: selectedInterestIDs,
             weeklyDigestEnabled: weeklyDigestEnabled,
             nearbyPerksEnabled: nearbyPerksEnabled,
-            biometricUnlockEnabled: biometricUnlockEnabled,
             serverUpdatedAt: updatedAt.flatMap(Self.parseDate)
         )
     }
@@ -1137,6 +1223,28 @@ private struct PerkRedemptionRow: Codable, Equatable, Sendable {
         case memberID = "member_id"
         case perkID = "perk_id"
         case redeemedAt = "redeemed_at"
+    }
+}
+
+private struct OfferClickRow: Codable, Equatable, Sendable {
+    let memberID: String
+    let perkID: String
+    let offerURL: String
+    let clickedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case memberID = "member_id"
+        case perkID = "perk_id"
+        case offerURL = "offer_url"
+        case clickedAt = "clicked_at"
+    }
+}
+
+private struct OfferClickRequest: Encodable, Equatable, Sendable {
+    let offerURL: String
+
+    enum CodingKeys: String, CodingKey {
+        case offerURL = "offer_url"
     }
 }
 
@@ -1243,7 +1351,11 @@ private struct AuthUserMetadata: Codable, Equatable, Sendable {
     let name: String?
 }
 
-private struct EmptyResponse: Decodable, Equatable, Sendable {}
+private protocol EmptyBackendResponse: Decodable {
+    init()
+}
+
+private struct EmptyResponse: EmptyBackendResponse, Equatable, Sendable {}
 
 struct SavePerkRequest: Encodable, Equatable, Sendable {
     let isSaved: Bool
@@ -1253,7 +1365,6 @@ struct PreferencesUpdateRequest: Encodable, Equatable, Sendable {
     let selectedInterestIDs: [String]
     let weeklyDigestEnabled: Bool
     let nearbyPerksEnabled: Bool
-    let biometricUnlockEnabled: Bool
 }
 
 struct ProfileUpdateRequest: Encodable, Equatable, Sendable {

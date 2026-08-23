@@ -7,6 +7,13 @@
 
 import SwiftUI
 
+private enum PulsePerksTab {
+    case discover
+    case surveys
+    case wallet
+    case account
+}
+
 struct ContentView: View {
     let configuration: SupabaseConfiguration
     let authSession: AuthSession
@@ -15,7 +22,9 @@ struct ContentView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
 
+    @State private var selectedTab = PulsePerksTab.discover
     @State private var selectedCategory = "All"
     @State private var selectedSort = PerkSort.bestValue
     @State private var searchText = ""
@@ -23,13 +32,16 @@ struct ContentView: View {
     @State private var selectedSurvey: Survey?
     @State private var isShowingNotifications = false
     @State private var isShowingProfileEditor = false
+    @State private var isShowingAffiliateDisclosure = false
+    @State private var isConfirmingClearOfferHistory = false
     @State private var redeemedPerkIDsValue: String
     @State private var savedPerkIDsValue: String
     @State private var completedSurveyIDsValue: String
     @State private var selectedInterestIDsValue: String
     @State private var weeklyDigestEnabled: Bool
     @State private var nearbyPerksEnabled: Bool
-    @State private var biometricUnlockEnabled: Bool
+    @State private var offerClickCount: Int
+    @State private var offerClickHistory: [OfferClickHistoryEntry]
     @State private var activeAuthSession: AuthSession
     @State private var preferenceSyncTask: Task<Void, Never>?
     @State private var activitySyncTask: Task<Void, Never>?
@@ -37,6 +49,7 @@ struct ContentView: View {
     @State private var savingPerkIDs = Set<String>()
     @State private var completingSurveyIDs = Set<String>()
     @State private var localActivityModifiedAt: Date?
+    @State private var hasPendingPreferenceSync = false
 
     @State private var store = PulsePerksStore.demo
     @State private var backendState = BackendState.notConfigured
@@ -62,8 +75,9 @@ struct ContentView: View {
         _selectedInterestIDsValue = State(initialValue: cachedActivity.selectedInterestIDsValue)
         _weeklyDigestEnabled = State(initialValue: cachedActivity.weeklyDigestEnabled)
         _nearbyPerksEnabled = State(initialValue: cachedActivity.nearbyPerksEnabled)
-        _biometricUnlockEnabled = State(initialValue: cachedActivity.biometricUnlockEnabled)
         _localActivityModifiedAt = State(initialValue: cachedActivity.modifiedAt)
+        _offerClickCount = State(initialValue: cachedActivity.offerClickCount)
+        _offerClickHistory = State(initialValue: cachedActivity.offerClickHistory)
         _activeAuthSession = State(initialValue: authSession)
 
         if let cachedBootstrap = UserBootstrapCache.load(userID: authSession.userID) {
@@ -123,46 +137,57 @@ struct ContentView: View {
     }
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             discoverTab
                 .tabItem {
                     Label("Discover", systemImage: "tag")
                 }
+                .tag(PulsePerksTab.discover)
 
             surveysTab
                 .tabItem {
                     Label("Surveys", systemImage: "list.clipboard")
                 }
+                .tag(PulsePerksTab.surveys)
 
             walletTab
                 .tabItem {
                     Label("Wallet", systemImage: "wallet.pass")
                 }
+                .tag(PulsePerksTab.wallet)
 
             accountTab
                 .tabItem {
                     Label("Account", systemImage: "person.crop.circle")
                 }
+                .tag(PulsePerksTab.account)
         }
         .tint(Color(red: 0.1, green: 0.55, blue: 0.42))
         .sheet(item: $selectedPerk) { perk in
             PerkDetailView(
                 perk: perk,
                 isRedeemed: redeemedPerkIDs.contains(perk.id),
-                isSaved: savedPerkIDs.contains(perk.id)
+                isSaved: savedPerkIDs.contains(perk.id),
+                isRedeeming: redeemingPerkIDs.contains(perk.id),
+                isSaving: savingPerkIDs.contains(perk.id)
             ) {
                 redeem(perk)
             } toggleSave: {
                 toggleSaved(perk)
+            } openOffer: {
+                openOffer(perk)
             }
         }
         .sheet(isPresented: $isShowingNotifications) {
-            NotificationsView(notifications: notifications)
+            NotificationsView(notifications: notifications) { notification in
+                openNotification(notification)
+            }
         }
         .sheet(item: $selectedSurvey) { survey in
             SurveyDetailView(
                 survey: survey,
                 isCompleted: completedSurveyIDs.contains(survey.id),
+                isCompleting: completingSurveyIDs.contains(survey.id),
                 matchScore: matchScore(for: survey),
                 matchReason: matchReason(for: survey)
             ) { responses in
@@ -174,6 +199,22 @@ struct ContentView: View {
                 await updateProfile(request)
             }
         }
+        .sheet(isPresented: $isShowingAffiliateDisclosure) {
+            AffiliateDisclosureView()
+        }
+        .confirmationDialog(
+            "Clear local offer history?",
+            isPresented: $isConfirmingClearOfferHistory,
+            titleVisibility: .visible
+        ) {
+            Button("Clear history", role: .destructive) {
+                clearOfferHistory()
+            }
+
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This clears the offer clicks shown on this device. Backend click logs used for partner reporting are not deleted.")
+        }
         .task {
             await loadBootstrap()
         }
@@ -181,12 +222,19 @@ struct ContentView: View {
             activeAuthSession = newSession
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else {
-                return
-            }
+            switch newPhase {
+            case .active:
+                if hasPendingPreferenceSync {
+                    retryPendingSync()
+                }
 
-            Task {
-                await refreshBootstrapIfStale()
+                Task {
+                    await refreshBootstrapIfStale()
+                }
+            case .inactive, .background:
+                flushPendingChangesForSuspension()
+            @unknown default:
+                break
             }
         }
     }
@@ -284,15 +332,6 @@ struct ContentView: View {
         }
     }
 
-    private var biometricUnlockBinding: Binding<Bool> {
-        Binding {
-            biometricUnlockEnabled
-        } set: { newValue in
-            biometricUnlockEnabled = newValue
-            syncPreferences()
-        }
-    }
-
     private var availableSurveys: [Survey] {
         store.availableSurveys(completedIDs: completedSurveyIDs)
     }
@@ -306,7 +345,11 @@ struct ContentView: View {
     }
 
     private var dailySurveyGoalProgress: Double {
-        min(Double(surveyPoints) / Double(dailySurveyGoal), 1)
+        store.dailySurveyGoalProgress(completedIDs: completedSurveyIDs)
+    }
+
+    private var rewardProgress: Double {
+        store.rewardProgress(redeemedPerkIDs: redeemedPerkIDs, completedSurveyIDs: completedSurveyIDs)
     }
 
     private var memberPoints: Int {
@@ -332,60 +375,134 @@ struct ContentView: View {
                 message: pointsUntilNextReward == 0
                     ? "Your $25 wellness credit is ready."
                     : "You are \(pointsUntilNextReward) points away from your next reward.",
-                iconName: "sparkles"
+                iconName: "sparkles",
+                actionTitle: "View wallet",
+                destination: .wallet
             ),
             PulseNotification(
                 title: "Saved perks",
                 message: savedPerks.isEmpty
                     ? "Save perks from Discover to compare offers later."
                     : "You have \(savedPerks.count) saved \(savedPerks.count == 1 ? "perk" : "perks") in Wallet.",
-                iconName: "bookmark"
+                iconName: "bookmark",
+                actionTitle: "Open wallet",
+                destination: .wallet
             ),
             PulseNotification(
                 title: "Survey points",
                 message: availableSurveys.isEmpty
                     ? "You completed every available survey."
                     : "\(availableSurveys.count) surveys can add \(availableSurveys.reduce(0) { $0 + $1.points }) points.",
-                iconName: "list.clipboard"
+                iconName: "list.clipboard",
+                actionTitle: "See surveys",
+                destination: .surveys
             ),
             PulseNotification(
                 title: "Nearby offers",
                 message: nearbyPerksEnabled
                     ? "Nearby perk alerts are enabled for local offers."
                     : "Turn on nearby perks in Account to get local offer alerts.",
-                iconName: "location"
+                iconName: "location",
+                actionTitle: "Manage alerts",
+                destination: .account
             )
         ]
     }
 
+    private var hasPendingSyncChanges: Bool {
+        !redeemingPerkIDs.isEmpty
+            || !savingPerkIDs.isEmpty
+            || !completingSurveyIDs.isEmpty
+            || hasPendingPreferenceSync
+    }
+
+    private var pendingSyncMessage: String {
+        var parts = [String]()
+
+        if !savingPerkIDs.isEmpty {
+            parts.append("\(savingPerkIDs.count) saved perk \(savingPerkIDs.count == 1 ? "change" : "changes")")
+        }
+
+        if !redeemingPerkIDs.isEmpty {
+            parts.append("\(redeemingPerkIDs.count) redemption \(redeemingPerkIDs.count == 1 ? "change" : "changes")")
+        }
+
+        if !completingSurveyIDs.isEmpty {
+            parts.append("\(completingSurveyIDs.count) survey \(completingSurveyIDs.count == 1 ? "submission" : "submissions")")
+        }
+
+        if hasPendingPreferenceSync {
+            parts.append("preference changes")
+        }
+
+        guard !parts.isEmpty else {
+            return "All local changes are synced."
+        }
+
+        let summary = parts.joined(separator: ", ")
+
+        if backendState == .failed {
+            return "\(summary) waiting for connection."
+        }
+
+        return "\(summary) syncing in the background."
+    }
+
+    private var syncQueueStatus: String {
+        hasPendingSyncChanges ? "Pending" : "Clear"
+    }
+
     @ViewBuilder
     private var syncStatusBanner: some View {
-        switch backendState {
-        case .loading:
-            SyncStatusBanner(
-                iconName: backendState.iconName,
-                title: "Syncing",
-                message: "Refreshing your perks and survey activity.",
-                isLoading: isLoadingBootstrap,
-                actionTitle: nil,
-                action: nil
-            )
-        case .failed:
-            SyncStatusBanner(
-                iconName: backendState.iconName,
-                title: "Offline mode",
-                message: backendStatusDetail,
-                isLoading: isLoadingBootstrap,
-                actionTitle: "Retry",
-                action: retryBootstrap
-            )
-        case .notConfigured, .connected:
-            EmptyView()
+        if hasPendingSyncChanges {
+            if backendState == .failed {
+                SyncStatusBanner(
+                    iconName: "arrow.triangle.2.circlepath",
+                    title: "Sync waiting",
+                    message: pendingSyncMessage,
+                    isLoading: false,
+                    actionTitle: "Retry sync",
+                    action: retryPendingSync
+                )
+            } else {
+                SyncStatusBanner(
+                    iconName: "arrow.triangle.2.circlepath",
+                    title: "Sync pending",
+                    message: pendingSyncMessage,
+                    isLoading: true,
+                    actionTitle: nil,
+                    action: nil
+                )
+            }
+        } else {
+            switch backendState {
+            case .loading:
+                SyncStatusBanner(
+                    iconName: backendState.iconName,
+                    title: "Syncing",
+                    message: "Refreshing your perks and survey activity.",
+                    isLoading: isLoadingBootstrap,
+                    actionTitle: nil,
+                    action: nil
+                )
+            case .failed:
+                SyncStatusBanner(
+                    iconName: backendState.iconName,
+                    title: "Offline mode",
+                    message: backendStatusDetail,
+                    isLoading: isLoadingBootstrap,
+                    actionTitle: "Retry",
+                    action: retryBootstrap
+                )
+            case .notConfigured, .connected:
+                EmptyView()
+            }
         }
     }
 
     private func redeem(_ perk: Perk) {
-        guard !redeemedPerkIDs.contains(perk.id),
+        guard !perk.isExpired,
+              !redeemedPerkIDs.contains(perk.id),
               !redeemingPerkIDs.contains(perk.id) else {
             return
         }
@@ -448,6 +565,31 @@ struct ContentView: View {
         }
     }
 
+    private func openOffer(_ perk: Perk) {
+        guard !perk.isExpired,
+              let offerURL = perk.offerURL else {
+            return
+        }
+
+        openURL(offerURL)
+        offerClickCount += 1
+        recordOfferClick(perk)
+        cacheActivity()
+
+        Task {
+            do {
+                try await performAuthenticatedRequest { backend in
+                    try await backend.trackOfferClick(perkID: perk.id, offerURL: offerURL)
+                }
+                backendState = .connected
+                backendStatusDetail = "Offer click tracked"
+            } catch {
+                backendState = .failed
+                backendStatusDetail = error.localizedDescription
+            }
+        }
+    }
+
     private func completeSurvey(_ survey: Survey, responses: [SurveyAnswerRequest]) {
         guard !completedSurveyIDs.contains(survey.id),
               !completingSurveyIDs.contains(survey.id) else {
@@ -474,6 +616,28 @@ struct ContentView: View {
 
             completingSurveyIDs.remove(survey.id)
         }
+    }
+
+    private func recordOfferClick(_ perk: Perk) {
+        offerClickHistory.insert(
+            OfferClickHistoryEntry(
+                perkID: perk.id,
+                perkTitle: perk.title,
+                partner: perk.partner,
+                offerKind: perk.offerKind
+            ),
+            at: 0
+        )
+
+        if offerClickHistory.count > 12 {
+            offerClickHistory = Array(offerClickHistory.prefix(12))
+        }
+    }
+
+    private func clearOfferHistory() {
+        offerClickCount = 0
+        offerClickHistory = []
+        cacheActivity()
     }
 
     private func toggleInterest(_ interest: Interest) {
@@ -551,27 +715,33 @@ struct ContentView: View {
         return Date().timeIntervalSince(lastBootstrapSync) > 300
     }
 
-    private func syncPreferences() {
+    private func syncPreferences(debounce: Bool = true) {
         cacheActivity()
+        hasPendingPreferenceSync = true
         preferenceSyncTask?.cancel()
 
         preferenceSyncTask = Task {
-            do {
-                try await Task.sleep(nanoseconds: 350_000_000)
-            } catch {
-                return
+            if debounce {
+                do {
+                    try await Task.sleep(nanoseconds: 350_000_000)
+                } catch {
+                    return
+                }
             }
 
             enqueueActivitySync {
-                await syncActivity { backend in
+                let didSync = await syncActivity { backend in
                     try await backend.updatePreferences(
                         PreferencesUpdateRequest(
                             selectedInterestIDs: Array(selectedInterestIDs).sorted(),
                             weeklyDigestEnabled: weeklyDigestEnabled,
-                            nearbyPerksEnabled: nearbyPerksEnabled,
-                            biometricUnlockEnabled: biometricUnlockEnabled
+                            nearbyPerksEnabled: nearbyPerksEnabled
                         )
                     )
+                }
+
+                if didSync {
+                    hasPendingPreferenceSync = false
                 }
             }
         }
@@ -580,9 +750,10 @@ struct ContentView: View {
     private func signOutUser() {
         preferenceSyncTask?.cancel()
         preferenceSyncTask = nil
+        hasPendingPreferenceSync = false
         activitySyncTask?.cancel()
         activitySyncTask = nil
-        UserDataCache.clear(userID: authSession.userID)
+        UserLocalDataStore.clearAll(userID: authSession.userID)
         signOut()
     }
 
@@ -606,15 +777,57 @@ struct ContentView: View {
         }
     }
 
+    private func retryPendingSync() {
+        if hasPendingPreferenceSync {
+            syncPreferences(debounce: false)
+        } else {
+            retryBootstrap()
+        }
+    }
+
+    private func flushPendingChangesForSuspension() {
+        cacheActivity()
+
+        guard hasPendingPreferenceSync else {
+            return
+        }
+
+        syncPreferences(debounce: false)
+    }
+
+    private func openNotification(_ notification: PulseNotification) {
+        switch notification.destination {
+        case .surveys:
+            selectedTab = .surveys
+        case .wallet:
+            selectedTab = .wallet
+        case .account:
+            selectedTab = .account
+        }
+
+        isShowingNotifications = false
+    }
+
     private func performAuthenticatedRequest<Response>(
         _ operation: (PulsePerksBackend) async throws -> Response
     ) async throws -> Response {
         try await refreshActiveSessionIfNeeded()
 
         do {
-            return try await operation(backend)
+            return try await performRetriableBackendOperation(operation)
         } catch let error as PulsePerksAPIError where error.isAuthenticationFailure {
             try await refreshActiveSessionIfNeeded(force: true)
+            return try await performRetriableBackendOperation(operation)
+        }
+    }
+
+    private func performRetriableBackendOperation<Response>(
+        _ operation: (PulsePerksBackend) async throws -> Response
+    ) async throws -> Response {
+        do {
+            return try await operation(backend)
+        } catch let error as PulsePerksAPIError where error.isTransientFailure {
+            try await Task.sleep(nanoseconds: 300_000_000)
             return try await operation(backend)
         }
     }
@@ -677,15 +890,38 @@ struct ContentView: View {
     }
 
     private func applyActivity(_ activity: MemberActivityResponse) {
-        savedPerkIDsValue = encodedIDs(Set(activity.savedPerkIDs))
-        redeemedPerkIDsValue = encodedIDs(Set(activity.redeemedPerkIDs))
-        completedSurveyIDsValue = encodedIDs(Set(activity.completedSurveyIDs))
-        selectedInterestIDsValue = encodedIDs(Set(activity.selectedInterestIDs))
-        weeklyDigestEnabled = activity.weeklyDigestEnabled
-        nearbyPerksEnabled = activity.nearbyPerksEnabled
-        biometricUnlockEnabled = activity.biometricUnlockEnabled
-        cacheActivity(modifiedAt: activity.serverUpdatedAt ?? Date())
-        UserBootstrapCache.updateActivity(activity, userID: authSession.userID)
+        let mergedActivity = activity.normalized.mergedWithLocalSnapshot(
+            currentActivityResponse,
+            localModifiedAt: localActivityModifiedAt
+        )
+
+        savedPerkIDsValue = encodedIDs(mergedSavedPerkIDs(from: mergedActivity))
+        redeemedPerkIDsValue = encodedIDs(Set(mergedActivity.redeemedPerkIDs).union(redeemingPerkIDs))
+        completedSurveyIDsValue = encodedIDs(Set(mergedActivity.completedSurveyIDs).union(completingSurveyIDs))
+
+        if !hasPendingPreferenceSync {
+            selectedInterestIDsValue = encodedIDs(Set(mergedActivity.selectedInterestIDs))
+            weeklyDigestEnabled = mergedActivity.weeklyDigestEnabled
+            nearbyPerksEnabled = mergedActivity.nearbyPerksEnabled
+        }
+
+        cacheActivity(modifiedAt: mergedActivity.serverUpdatedAt ?? localActivityModifiedAt ?? Date())
+        UserBootstrapCache.updateActivity(currentActivityResponse, userID: authSession.userID)
+    }
+
+    private func mergedSavedPerkIDs(from activity: MemberActivityResponse) -> Set<String> {
+        var ids = Set(activity.savedPerkIDs)
+        let localIDs = savedPerkIDs
+
+        for perkID in savingPerkIDs {
+            if localIDs.contains(perkID) {
+                ids.insert(perkID)
+            } else {
+                ids.remove(perkID)
+            }
+        }
+
+        return ids
     }
 
     private var currentActivityResponse: MemberActivityResponse {
@@ -695,8 +931,7 @@ struct ContentView: View {
             completedSurveyIDs: Array(completedSurveyIDs).sorted(),
             selectedInterestIDs: Array(selectedInterestIDs).sorted(),
             weeklyDigestEnabled: weeklyDigestEnabled,
-            nearbyPerksEnabled: nearbyPerksEnabled,
-            biometricUnlockEnabled: biometricUnlockEnabled
+            nearbyPerksEnabled: nearbyPerksEnabled
         )
     }
 
@@ -709,7 +944,8 @@ struct ContentView: View {
             selectedInterestIDsValue: selectedInterestIDsValue,
             weeklyDigestEnabled: weeklyDigestEnabled,
             nearbyPerksEnabled: nearbyPerksEnabled,
-            biometricUnlockEnabled: biometricUnlockEnabled,
+            offerClickCount: offerClickCount,
+            offerClickHistory: offerClickHistory,
             modifiedAt: modifiedAt
         )
         .save(userID: authSession.userID)
@@ -812,7 +1048,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ProgressView(value: Double(memberPoints), total: Double(nextRewardPoints))
+            ProgressView(value: rewardProgress)
                 .tint(Color(red: 0.1, green: 0.55, blue: 0.42))
 
             Text(pointsUntilNextReward == 0 ? "Your $25 wellness credit is ready to redeem." : "Unlock a $25 wellness credit when you reach \(nextRewardPoints.formatted()) points.")
@@ -1071,6 +1307,7 @@ struct ContentView: View {
                         showsRedeemedState: true
                     )
 
+                    recentOfferClicks
                     recentActivity
                 }
                 .padding(20)
@@ -1099,7 +1336,7 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 StatBadge(value: memberPoints.formatted(), label: "Points")
                 StatBadge(value: "\(savedPerks.count)", label: "Saved")
-                StatBadge(value: "+\(surveyPoints)", label: "Survey pts")
+                StatBadge(value: "\(offerClickCount)", label: "Clicks")
             }
         }
         .padding(18)
@@ -1136,6 +1373,32 @@ struct ContentView: View {
         }
     }
 
+    private var recentOfferClicks: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Recently opened offers")
+                .font(.title2.weight(.bold))
+
+            if offerClickHistory.isEmpty {
+                Text("Opened vendor offers will appear here so you can get back to a partner deal quickly.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(AppTheme.stroke(for: colorScheme))
+                    )
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(offerClickHistory.prefix(5)) { entry in
+                        OfferClickActivityRow(entry: entry)
+                    }
+                }
+            }
+        }
+    }
+
     private var accountTab: some View {
         NavigationStack {
             ScrollView {
@@ -1149,6 +1412,13 @@ struct ContentView: View {
                         AccountRow(iconName: backendState.iconName, title: "Data source", value: backendState.title)
                         AccountRow(iconName: "info.circle", title: "Backend status", value: backendStatusDetail)
                         AccountRow(iconName: "network", title: "Backend host", value: backendHost)
+                        AccountRow(iconName: "arrow.triangle.2.circlepath", title: "Sync queue", value: syncQueueStatus)
+                        AccountRow(iconName: "link", title: "Offer clicks", value: offerClickCount.formatted())
+
+                        if hasPendingSyncChanges {
+                            AccountStatusRow(iconName: "clock.arrow.circlepath", message: pendingSyncMessage)
+                        }
+
                         AccountRetryRow(isLoading: isLoadingBootstrap) {
                             Task {
                                 await loadBootstrap()
@@ -1159,7 +1429,14 @@ struct ContentView: View {
                         }
                         AccountToggleRow(iconName: "bell", title: "Weekly digest", isOn: weeklyDigestBinding)
                         AccountToggleRow(iconName: "location", title: "Nearby perks", isOn: nearbyPerksBinding)
-                        AccountToggleRow(iconName: "lock", title: "Biometric unlock", isOn: biometricUnlockBinding)
+                        AccountInfoActionRow(iconName: "megaphone", title: "Affiliate disclosure") {
+                            isShowingAffiliateDisclosure = true
+                        }
+                        AccountActionRow(iconName: "trash", title: "Clear offer history") {
+                            isConfirmingClearOfferHistory = true
+                        }
+                        .disabled(offerClickCount == 0 && offerClickHistory.isEmpty)
+
                         AccountActionRow(iconName: "rectangle.portrait.and.arrow.right", title: "Sign out") {
                             signOutUser()
                         }
@@ -1361,19 +1638,9 @@ private struct UserActivityCache: Codable {
     let selectedInterestIDsValue: String
     let weeklyDigestEnabled: Bool
     let nearbyPerksEnabled: Bool
-    let biometricUnlockEnabled: Bool
+    let offerClickCount: Int
+    let offerClickHistory: [OfferClickHistoryEntry]
     let modifiedAt: Date?
-
-    enum CodingKeys: String, CodingKey {
-        case redeemedPerkIDsValue
-        case savedPerkIDsValue
-        case completedSurveyIDsValue
-        case selectedInterestIDsValue
-        case weeklyDigestEnabled
-        case nearbyPerksEnabled
-        case biometricUnlockEnabled
-        case modifiedAt
-    }
 
     init(
         redeemedPerkIDsValue: String,
@@ -1382,7 +1649,8 @@ private struct UserActivityCache: Codable {
         selectedInterestIDsValue: String,
         weeklyDigestEnabled: Bool,
         nearbyPerksEnabled: Bool,
-        biometricUnlockEnabled: Bool,
+        offerClickCount: Int,
+        offerClickHistory: [OfferClickHistoryEntry],
         modifiedAt: Date?
     ) {
         self.redeemedPerkIDsValue = redeemedPerkIDsValue
@@ -1391,7 +1659,8 @@ private struct UserActivityCache: Codable {
         self.selectedInterestIDsValue = selectedInterestIDsValue
         self.weeklyDigestEnabled = weeklyDigestEnabled
         self.nearbyPerksEnabled = nearbyPerksEnabled
-        self.biometricUnlockEnabled = biometricUnlockEnabled
+        self.offerClickCount = offerClickCount
+        self.offerClickHistory = offerClickHistory
         self.modifiedAt = modifiedAt
     }
 
@@ -1403,7 +1672,8 @@ private struct UserActivityCache: Codable {
         selectedInterestIDsValue = try container.decode(String.self, forKey: .selectedInterestIDsValue)
         weeklyDigestEnabled = try container.decode(Bool.self, forKey: .weeklyDigestEnabled)
         nearbyPerksEnabled = try container.decode(Bool.self, forKey: .nearbyPerksEnabled)
-        biometricUnlockEnabled = try container.decode(Bool.self, forKey: .biometricUnlockEnabled)
+        offerClickCount = try container.decodeIfPresent(Int.self, forKey: .offerClickCount) ?? 0
+        offerClickHistory = try container.decodeIfPresent([OfferClickHistoryEntry].self, forKey: .offerClickHistory) ?? []
         modifiedAt = try container.decodeIfPresent(Date.self, forKey: .modifiedAt)
     }
 
@@ -1442,7 +1712,8 @@ private struct UserActivityCache: Codable {
             selectedInterestIDsValue: "shopping,wellness",
             weeklyDigestEnabled: true,
             nearbyPerksEnabled: true,
-            biometricUnlockEnabled: false,
+            offerClickCount: 0,
+            offerClickHistory: [],
             modifiedAt: nil
         )
     }
@@ -1518,13 +1789,6 @@ private struct UserBootstrapCache: Codable {
 
     private static func key(for userID: String) -> String {
         "userBootstrap.\(userID)"
-    }
-}
-
-enum UserDataCache {
-    static func clear(userID: String) {
-        UserActivityCache.clear(userID: userID)
-        UserBootstrapCache.clear(userID: userID)
     }
 }
 

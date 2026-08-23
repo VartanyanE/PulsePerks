@@ -10,6 +10,46 @@ struct PulseNotification: Identifiable {
     let title: String
     let message: String
     let iconName: String
+    let actionTitle: String
+    let destination: NotificationDestination
+}
+
+struct OfferClickHistoryEntry: Identifiable, Codable, Equatable {
+    let id: UUID
+    let perkID: String
+    let perkTitle: String
+    let partner: String
+    let offerKind: OfferKind
+    let clickedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        perkID: String,
+        perkTitle: String,
+        partner: String,
+        offerKind: OfferKind,
+        clickedAt: Date = Date()
+    ) {
+        self.id = id
+        self.perkID = perkID
+        self.perkTitle = perkTitle
+        self.partner = partner
+        self.offerKind = offerKind
+        self.clickedAt = clickedAt
+    }
+}
+
+enum NotificationDestination {
+    case surveys
+    case wallet
+    case account
+}
+
+enum UserLocalDataStore {
+    static func clearAll(userID: String) {
+        UserDefaults.standard.removeObject(forKey: "userActivity.\(userID)")
+        UserDefaults.standard.removeObject(forKey: "userBootstrap.\(userID)")
+    }
 }
 
 struct MemberProfile: Identifiable {
@@ -92,6 +132,63 @@ enum PerkSort: String, CaseIterable, Codable, Identifiable {
         case .endingSoon:
             lhs.daysUntilExpiration < rhs.daysUntilExpiration
         }
+    }
+}
+
+enum OfferKind: String, Codable, Equatable {
+    case affiliate
+    case sponsored
+    case promoCode
+    case direct
+
+    var title: String {
+        switch self {
+        case .affiliate:
+            "Affiliate offer"
+        case .sponsored:
+            "Sponsored offer"
+        case .promoCode:
+            "Promo code"
+        case .direct:
+            "Partner link"
+        }
+    }
+
+    var disclosure: String {
+        switch self {
+        case .affiliate:
+            "Opens a partner site. Pulse Perks may earn a commission and track this click to measure offer performance."
+        case .sponsored:
+            "Opens a partner site. This placement may be sponsored and Pulse Perks may track this click."
+        case .promoCode:
+            "Use this code with the partner. Pulse Perks may track redemptions to measure offer performance."
+        case .direct:
+            "Opens a partner site. Pulse Perks may track this click to measure offer performance."
+        }
+    }
+}
+
+extension URL {
+    static func supportedOfferURL(from value: String?) -> URL? {
+        guard let value,
+              let url = URL(string: value),
+              url.isSupportedOfferURL else {
+            return nil
+        }
+
+        return url
+    }
+
+    var isSupportedOfferURL: Bool {
+        guard let components = URLComponents(url: self, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = components.host,
+              !host.isEmpty else {
+            return false
+        }
+
+        return true
     }
 }
 
@@ -244,8 +341,14 @@ struct Perk: Identifiable {
     let terms: String
     let estimatedSavings: Int
     let memberCode: String
+    let offerURL: URL?
+    let offerKind: OfferKind
     let iconName: String
     let tint: Color
+
+    var isExpired: Bool {
+        daysUntilExpiration <= 0
+    }
 
     static let sampleData: [Perk] = [
         Perk(
@@ -263,6 +366,8 @@ struct Perk: Identifiable {
             terms: "Valid once per member. Weekday orders only. Cannot be combined with other offers.",
             estimatedSavings: 12,
             memberCode: "PULSE-SG12",
+            offerURL: URL(string: "https://www.sweetgreen.com/"),
+            offerKind: .affiliate,
             iconName: "fork.knife",
             tint: Color(red: 0.1, green: 0.55, blue: 0.42)
         ),
@@ -281,6 +386,8 @@ struct Perk: Identifiable {
             terms: "New monthly plans only. Bonus credits expire 30 days after activation.",
             estimatedSavings: 39,
             memberCode: "PULSE-FIT20",
+            offerURL: URL(string: "https://classpass.com/"),
+            offerKind: .affiliate,
             iconName: "figure.run",
             tint: Color(red: 0.15, green: 0.42, blue: 0.78)
         ),
@@ -299,6 +406,8 @@ struct Perk: Identifiable {
             terms: "Eligible stays only. Taxes, fees, and blackout dates may apply.",
             estimatedSavings: 48,
             memberCode: "PULSE-STAY18",
+            offerURL: URL(string: "https://www.hoteltonight.com/"),
+            offerKind: .sponsored,
             iconName: "airplane.departure",
             tint: Color(red: 0.73, green: 0.26, blue: 0.18)
         ),
@@ -317,6 +426,8 @@ struct Perk: Identifiable {
             terms: "Applies to full-price items. Excludes gift cards, final sale, and prior purchases.",
             estimatedSavings: 25,
             memberCode: "PULSE-EV15",
+            offerURL: URL(string: "https://www.everlane.com/"),
+            offerKind: .affiliate,
             iconName: "bag",
             tint: Color(red: 0.48, green: 0.34, blue: 0.75)
         )
