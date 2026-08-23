@@ -1,6 +1,6 @@
 //
 //  Models.swift
-//  Pulse Perks
+//  RewardLoop
 //
 
 import SwiftUI
@@ -157,13 +157,13 @@ enum OfferKind: String, Codable, Equatable {
     var disclosure: String {
         switch self {
         case .affiliate:
-            "Opens a partner site. Pulse Perks may earn a commission and track this click to measure offer performance."
+            "Opens a partner site. RewardLoop may earn a commission and track this click to measure offer performance."
         case .sponsored:
-            "Opens a partner site. This placement may be sponsored and Pulse Perks may track this click."
+            "Opens a partner site. This placement may be sponsored and RewardLoop may track this click."
         case .promoCode:
-            "Use this code with the partner. Pulse Perks may track redemptions to measure offer performance."
+            "Use this code with the partner. RewardLoop may track redemptions to measure offer performance."
         case .direct:
-            "Opens a partner site. Pulse Perks may track this click to measure offer performance."
+            "Opens a partner site. RewardLoop may track this click to measure offer performance."
         }
     }
 }

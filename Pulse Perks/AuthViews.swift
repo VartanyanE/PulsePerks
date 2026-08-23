@@ -1,6 +1,6 @@
 //
 //  AuthViews.swift
-//  Pulse Perks
+//  RewardLoop
 //
 
 import Security
@@ -136,7 +136,7 @@ private struct ConfigurationUnavailableView: View {
             Text("Configure Supabase")
                 .font(.largeTitle.weight(.bold))
 
-            Text("Pulse Perks needs backend configuration before members can sign in or sync rewards.")
+            Text("RewardLoop needs backend configuration before members can sign in or sync rewards.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -232,7 +232,7 @@ private struct OnboardingView: View {
             Text("Personalize surveys")
                 .font(.largeTitle.weight(.bold))
 
-            Text("Choose the topics you care about so Pulse Perks can prioritize better survey matches.")
+            Text("Choose the topics you care about so RewardLoop can prioritize better survey matches.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -385,7 +385,7 @@ private struct AuthView: View {
                 .padding(20)
             }
             .background(AppTheme.pageBackground(for: colorScheme))
-            .navigationTitle("Pulse Perks")
+            .navigationTitle("RewardLoop")
         }
     }
 

@@ -1,6 +1,6 @@
 //
 //  PulsePerksBackend.swift
-//  Pulse Perks
+//  RewardLoop
 //
 
 import Foundation

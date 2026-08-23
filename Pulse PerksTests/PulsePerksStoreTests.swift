@@ -1,6 +1,6 @@
 //
 //  PulsePerksStoreTests.swift
-//  Pulse PerksTests
+//  RewardLoopTests
 //
 
 import Foundation

@@ -1,6 +1,6 @@
 //
 //  ReusableViews.swift
-//  Pulse Perks
+//  RewardLoop
 //
 
 import SwiftUI
@@ -743,7 +743,7 @@ struct PerkDetailView: View {
                             }
                             .disabled(perk.isExpired)
 
-                            Text(perk.isExpired ? "This partner offer has expired and can no longer be opened from Pulse Perks." : perk.offerKind.disclosure)
+                            Text(perk.isExpired ? "This partner offer has expired and can no longer be opened from RewardLoop." : perk.offerKind.disclosure)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1220,19 +1220,19 @@ struct AffiliateDisclosureView: View {
                     DisclosureInfoCard(
                         iconName: "link",
                         title: "Partner links",
-                        message: "Some offers open a partner website or app. Pulse Perks may earn money when you click, sign up, buy, or redeem through those partner offers."
+                        message: "Some offers open a partner website or app. RewardLoop may earn money when you click, sign up, buy, or redeem through those partner offers."
                     )
 
                     DisclosureInfoCard(
                         iconName: "megaphone",
                         title: "Sponsored placements",
-                        message: "Some offers may be paid placements. Sponsored status does not change the member price shown in Pulse Perks."
+                        message: "Some offers may be paid placements. Sponsored status does not change the member price shown in RewardLoop."
                     )
 
                     DisclosureInfoCard(
                         iconName: "chart.line.uptrend.xyaxis",
                         title: "Click tracking",
-                        message: "Pulse Perks records offer clicks to measure which partners and categories are useful. Your recent opened offers also appear in Wallet for convenience."
+                        message: "RewardLoop records offer clicks to measure which partners and categories are useful. Your recent opened offers also appear in Wallet for convenience."
                     )
 
                     DisclosureInfoCard(
@@ -1264,7 +1264,7 @@ struct AffiliateDisclosureView: View {
             Text("Affiliate disclosure")
                 .font(.largeTitle.weight(.bold))
 
-            Text("Pulse Perks connects members with partner offers. This page explains how those links may support the app.")
+            Text("RewardLoop connects members with partner offers. This page explains how those links may support the app.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }

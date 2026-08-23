@@ -1,11 +1,14 @@
 //
 //  ContentView.swift
-//  Pulse Perks
+//  RewardLoop
 //
 //  Created by Emanuil Vartanyan on 8/16/26.
 //
 
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private enum PulsePerksTab {
     case discover
@@ -34,6 +37,9 @@ struct ContentView: View {
     @State private var isShowingProfileEditor = false
     @State private var isShowingAffiliateDisclosure = false
     @State private var isConfirmingClearOfferHistory = false
+    @State private var isConfirmingOpenOffer = false
+    @State private var diagnosticsStatusMessage: String?
+    @State private var pendingOfferToOpen: Perk?
     @State private var redeemedPerkIDsValue: String
     @State private var savedPerkIDsValue: String
     @State private var completedSurveyIDsValue: String
@@ -94,6 +100,14 @@ struct ContentView: View {
 
     private var backendHost: String {
         configuration.projectURL.host() ?? "Not configured"
+    }
+
+    private var lastSyncStatus: String {
+        guard let lastBootstrapSync else {
+            return "Not synced yet"
+        }
+
+        return lastBootstrapSync.formatted(date: .abbreviated, time: .shortened)
     }
 
     private var categories: [String] {
@@ -175,7 +189,7 @@ struct ContentView: View {
             } toggleSave: {
                 toggleSaved(perk)
             } openOffer: {
-                openOffer(perk)
+                requestOpenOffer(perk)
             }
         }
         .sheet(isPresented: $isShowingNotifications) {
@@ -214,6 +228,23 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This clears the offer clicks shown on this device. Backend click logs used for partner reporting are not deleted.")
+        }
+        .confirmationDialog(
+            "Open partner offer?",
+            isPresented: $isConfirmingOpenOffer,
+            titleVisibility: .visible
+        ) {
+            if let pendingOfferToOpen {
+                Button("Open \(pendingOfferToOpen.partner)") {
+                    openOffer(pendingOfferToOpen)
+                }
+            }
+
+            Button("Cancel", role: .cancel) {
+                pendingOfferToOpen = nil
+            }
+        } message: {
+            Text(openOfferConfirmationMessage)
         }
         .task {
             await loadBootstrap()
@@ -259,7 +290,7 @@ struct ContentView: View {
                 await loadBootstrap()
             }
             .background(AppTheme.pageBackground(for: colorScheme))
-            .navigationTitle("Pulse Perks")
+            .navigationTitle("RewardLoop")
         }
     }
 
@@ -452,6 +483,19 @@ struct ContentView: View {
         hasPendingSyncChanges ? "Pending" : "Clear"
     }
 
+    private var isDataStale: Bool {
+        guard backendState == .connected,
+              let lastBootstrapSync else {
+            return false
+        }
+
+        return Date().timeIntervalSince(lastBootstrapSync) > 3_600
+    }
+
+    private var dataFreshnessStatus: String {
+        isDataStale ? "Stale" : "Current"
+    }
+
     @ViewBuilder
     private var syncStatusBanner: some View {
         if hasPendingSyncChanges {
@@ -492,6 +536,15 @@ struct ContentView: View {
                     message: backendStatusDetail,
                     isLoading: isLoadingBootstrap,
                     actionTitle: "Retry",
+                    action: retryBootstrap
+                )
+            case .connected where isDataStale:
+                SyncStatusBanner(
+                    iconName: "clock.badge.exclamationmark",
+                    title: "Refresh recommended",
+                    message: "Perks last refreshed \(lastSyncStatus). Pull to refresh or retry sync to get the latest offers.",
+                    isLoading: isLoadingBootstrap,
+                    actionTitle: "Refresh",
                     action: retryBootstrap
                 )
             case .notConfigured, .connected:
@@ -565,12 +618,24 @@ struct ContentView: View {
         }
     }
 
-    private func openOffer(_ perk: Perk) {
+    private func requestOpenOffer(_ perk: Perk) {
         guard !perk.isExpired,
-              let offerURL = perk.offerURL else {
+              perk.offerURL != nil else {
             return
         }
 
+        pendingOfferToOpen = perk
+        isConfirmingOpenOffer = true
+    }
+
+    private func openOffer(_ perk: Perk) {
+        guard !perk.isExpired,
+              let offerURL = perk.offerURL else {
+            pendingOfferToOpen = nil
+            return
+        }
+
+        pendingOfferToOpen = nil
         openURL(offerURL)
         offerClickCount += 1
         recordOfferClick(perk)
@@ -588,6 +653,16 @@ struct ContentView: View {
                 backendStatusDetail = error.localizedDescription
             }
         }
+    }
+
+    private var openOfferConfirmationMessage: String {
+        guard let pendingOfferToOpen,
+              let offerURL = pendingOfferToOpen.offerURL else {
+            return "You are about to leave RewardLoop."
+        }
+
+        let host = offerURL.host() ?? "the partner site"
+        return "You are leaving RewardLoop for \(host). \(pendingOfferToOpen.offerKind.disclosure)"
     }
 
     private func completeSurvey(_ survey: Survey, responses: [SurveyAnswerRequest]) {
@@ -637,7 +712,34 @@ struct ContentView: View {
     private func clearOfferHistory() {
         offerClickCount = 0
         offerClickHistory = []
+        diagnosticsStatusMessage = nil
         cacheActivity()
+    }
+
+    private func copyDiagnostics() {
+        let diagnostics = [
+            "RewardLoop diagnostics",
+            "Data source: \(backendState.title)",
+            "Backend status: \(backendStatusDetail)",
+            "Data freshness: \(dataFreshnessStatus)",
+            "Last refresh: \(lastSyncStatus)",
+            "Backend host: \(backendHost)",
+            "Sync queue: \(syncQueueStatus)",
+            "Saved perks: \(savedPerks.count)",
+            "Redeemed perks: \(redeemedPerks.count)",
+            "Completed surveys: \(completedSurveyIDs.count)",
+            "Offer clicks: \(offerClickCount)",
+            "Active perks: \(perks.count)",
+            "Available surveys: \(availableSurveys.count)"
+        ]
+        .joined(separator: "\n")
+
+        #if canImport(UIKit)
+        UIPasteboard.general.string = diagnostics
+        diagnosticsStatusMessage = "Diagnostics copied. No access tokens or API keys were included."
+        #else
+        diagnosticsStatusMessage = "Copy diagnostics is unavailable on this device."
+        #endif
     }
 
     private func toggleInterest(_ interest: Interest) {
@@ -1411,12 +1513,18 @@ struct ContentView: View {
                         AccountRow(iconName: "envelope", title: "Signed in", value: activeAuthSession.email)
                         AccountRow(iconName: backendState.iconName, title: "Data source", value: backendState.title)
                         AccountRow(iconName: "info.circle", title: "Backend status", value: backendStatusDetail)
+                        AccountRow(iconName: "gauge.with.dots.needle.bottom.50percent", title: "Data freshness", value: dataFreshnessStatus)
+                        AccountRow(iconName: "clock", title: "Last refresh", value: lastSyncStatus)
                         AccountRow(iconName: "network", title: "Backend host", value: backendHost)
                         AccountRow(iconName: "arrow.triangle.2.circlepath", title: "Sync queue", value: syncQueueStatus)
                         AccountRow(iconName: "link", title: "Offer clicks", value: offerClickCount.formatted())
 
                         if hasPendingSyncChanges {
                             AccountStatusRow(iconName: "clock.arrow.circlepath", message: pendingSyncMessage)
+                        }
+
+                        if let diagnosticsStatusMessage {
+                            AccountStatusRow(iconName: "doc.on.clipboard", message: diagnosticsStatusMessage)
                         }
 
                         AccountRetryRow(isLoading: isLoadingBootstrap) {
@@ -1431,6 +1539,9 @@ struct ContentView: View {
                         AccountToggleRow(iconName: "location", title: "Nearby perks", isOn: nearbyPerksBinding)
                         AccountInfoActionRow(iconName: "megaphone", title: "Affiliate disclosure") {
                             isShowingAffiliateDisclosure = true
+                        }
+                        AccountInfoActionRow(iconName: "doc.on.doc", title: "Copy diagnostics") {
+                            copyDiagnostics()
                         }
                         AccountActionRow(iconName: "trash", title: "Clear offer history") {
                             isConfirmingClearOfferHistory = true

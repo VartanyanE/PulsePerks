@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "DED01CF83032A96900DCDA8F"
-               BuildableName = "Pulse Perks.app"
+               BuildableName = "RewardLoop.app"
                BlueprintName = "Pulse Perks"
                ReferencedContainer = "container:Pulse Perks.xcodeproj">
             </BuildableReference>
@@ -46,7 +46,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "DED01CF83032A96900DCDA8F"
-            BuildableName = "Pulse Perks.app"
+            BuildableName = "RewardLoop.app"
             BlueprintName = "Pulse Perks"
             ReferencedContainer = "container:Pulse Perks.xcodeproj">
          </BuildableReference>
@@ -63,7 +63,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "DED01CF83032A96900DCDA8F"
-            BuildableName = "Pulse Perks.app"
+            BuildableName = "RewardLoop.app"
             BlueprintName = "Pulse Perks"
             ReferencedContainer = "container:Pulse Perks.xcodeproj">
          </BuildableReference>

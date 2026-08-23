@@ -1,6 +1,6 @@
 //
 //  SupabaseSecrets.swift
-//  Pulse Perks
+//  RewardLoop
 //
 
 #if DEBUG

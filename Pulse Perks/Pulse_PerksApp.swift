@@ -1,6 +1,6 @@
 //
 //  Pulse_PerksApp.swift
-//  Pulse Perks
+//  RewardLoop
 //
 //  Created by Emanuil Vartanyan on 8/16/26.
 //

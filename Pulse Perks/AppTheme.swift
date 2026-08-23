@@ -1,6 +1,6 @@
 //
 //  AppTheme.swift
-//  Pulse Perks
+//  RewardLoop
 //
 
 import SwiftUI
