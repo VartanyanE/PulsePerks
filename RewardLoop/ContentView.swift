@@ -10,7 +10,7 @@ import SwiftUI
 import UIKit
 #endif
 
-private enum PulsePerksTab {
+private enum RewardLoopTab {
     case discover
     case surveys
     case wallet
@@ -27,7 +27,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
 
-    @State private var selectedTab = PulsePerksTab.discover
+    @State private var selectedTab = RewardLoopTab.discover
     @State private var selectedCategory = "All"
     @State private var selectedSort = PerkSort.bestValue
     @State private var searchText = ""
@@ -61,12 +61,13 @@ struct ContentView: View {
     @State private var localActivityModifiedAt: Date?
     @State private var hasPendingPreferenceSync = false
 
-    @State private var store = PulsePerksStore.demo
+    @State private var store = RewardLoopStore.demo
     @State private var partnerSurveyOffers = [PartnerSurveyOffer]()
     @State private var partnerSurveySessions = [PartnerSurveySession]()
     @State private var partnerSurveyStatusMessage = "Partner surveys are loading."
     @State private var partnerSurveyState = PartnerSurveyConnectionState.loading
     @State private var isLoadingPartnerSurveys = false
+    @State private var isAwaitingPartnerSurveyReturn = false
     @State private var backendState = BackendState.notConfigured
     @State private var backendStatusDetail = "Using local demo data"
     @State private var isLoadingBootstrap = false
@@ -96,15 +97,15 @@ struct ContentView: View {
         _activeAuthSession = State(initialValue: authSession)
 
         if let cachedBootstrap = UserBootstrapCache.load(userID: authSession.userID) {
-            _store = State(initialValue: PulsePerksStore(response: cachedBootstrap.response))
+            _store = State(initialValue: RewardLoopStore(response: cachedBootstrap.response))
             _backendState = State(initialValue: .failed)
             _backendStatusDetail = State(initialValue: "Using saved data until Supabase syncs.")
             _lastBootstrapSync = State(initialValue: cachedBootstrap.cachedAt)
         }
     }
 
-    private var backend: PulsePerksBackend {
-        SupabasePulsePerksClient(configuration: configuration.authenticated(with: activeAuthSession))
+    private var backend: RewardLoopBackend {
+        SupabaseRewardLoopClient(configuration: configuration.authenticated(with: activeAuthSession))
     }
 
     private var backendHost: String {
@@ -165,25 +166,25 @@ struct ContentView: View {
                 .tabItem {
                     Label("Discover", systemImage: "tag")
                 }
-                .tag(PulsePerksTab.discover)
+                .tag(RewardLoopTab.discover)
 
             surveysTab
                 .tabItem {
                     Label("Surveys", systemImage: "list.clipboard")
                 }
-                .tag(PulsePerksTab.surveys)
+                .tag(RewardLoopTab.surveys)
 
             walletTab
                 .tabItem {
                     Label("Wallet", systemImage: "wallet.pass")
                 }
-                .tag(PulsePerksTab.wallet)
+                .tag(RewardLoopTab.wallet)
 
             accountTab
                 .tabItem {
                     Label("Account", systemImage: "person.crop.circle")
                 }
-                .tag(PulsePerksTab.account)
+                .tag(RewardLoopTab.account)
         }
         .tint(Color(red: 0.1, green: 0.55, blue: 0.42))
         .sheet(item: $selectedPerk) { perk in
@@ -290,6 +291,7 @@ struct ContentView: View {
 
                 Task {
                     await refreshBootstrapIfStale()
+                    await refreshPartnerSurveySessionsAfterReturnIfNeeded()
                 }
             case .inactive, .background:
                 flushPendingChangesForSuspension()
@@ -838,7 +840,7 @@ struct ContentView: View {
                 localActivitySnapshot,
                 localModifiedAt: localActivityModifiedAt
             )
-            store = PulsePerksStore(response: response)
+            store = RewardLoopStore(response: response)
             UserBootstrapCache.save(response, userID: authSession.userID)
             applyActivity(mergedActivity)
 
@@ -921,7 +923,7 @@ struct ContentView: View {
                     try await backend.startPartnerSurvey(offerID: offer.id)
                 }
                 guard let entryURL = URL.supportedOfferURL(from: session.entryURL) else {
-                    throw PulsePerksAPIError.invalidURL
+                    throw RewardLoopAPIError.invalidURL
                 }
 
                 if let mappedSession = PartnerSurveySession(response: session) {
@@ -930,6 +932,7 @@ struct ContentView: View {
                 }
 
                 openURL(entryURL)
+                isAwaitingPartnerSurveyReturn = true
                 partnerSurveyState = .connected
                 partnerSurveyStatusMessage = "Partner survey started."
             } catch {
@@ -948,6 +951,47 @@ struct ContentView: View {
 
         let host = pendingPartnerSurvey.entryURL.host() ?? pendingPartnerSurvey.provider.title
         return "You are leaving RewardLoop for \(host). Points are awarded only after the partner confirms completion."
+    }
+
+    private func refreshPartnerSurveySessionsAfterReturnIfNeeded() async {
+        guard isAwaitingPartnerSurveyReturn || partnerSurveySessions.contains(where: { $0.status == .started }) else {
+            return
+        }
+
+        await refreshPartnerSurveySessions(statusMessage: "Checking partner survey status.")
+    }
+
+    private func refreshPartnerSurveySessions(statusMessage: String? = nil) async {
+        guard !isLoadingPartnerSurveys else {
+            return
+        }
+
+        isLoadingPartnerSurveys = true
+        defer {
+            isLoadingPartnerSurveys = false
+        }
+
+        if let statusMessage {
+            partnerSurveyStatusMessage = statusMessage
+        }
+
+        do {
+            let sessionResponses = try await performAuthenticatedRequest { backend in
+                try await backend.fetchPartnerSurveySessions()
+            }
+            let refreshedSessions = sessionResponses.compactMap(PartnerSurveySession.init(response:))
+            let completedCount = refreshedSessions.filter(\.awardsPoints).count
+
+            partnerSurveySessions = refreshedSessions
+            isAwaitingPartnerSurveyReturn = refreshedSessions.contains { $0.status == .started }
+            partnerSurveyState = partnerSurveyOffers.isEmpty && refreshedSessions.isEmpty ? .empty : .connected
+            partnerSurveyStatusMessage = completedCount > 0
+                ? "\(completedCount) partner \(completedCount == 1 ? "survey" : "surveys") confirmed."
+                : "Partner survey status refreshed."
+        } catch {
+            partnerSurveyState = .failed
+            partnerSurveyStatusMessage = error.localizedDescription
+        }
     }
 
     private func refreshBootstrapIfStale() async {
@@ -1064,24 +1108,24 @@ struct ContentView: View {
     }
 
     private func performAuthenticatedRequest<Response>(
-        _ operation: (PulsePerksBackend) async throws -> Response
+        _ operation: (RewardLoopBackend) async throws -> Response
     ) async throws -> Response {
         try await refreshActiveSessionIfNeeded()
 
         do {
             return try await performRetriableBackendOperation(operation)
-        } catch let error as PulsePerksAPIError where error.isAuthenticationFailure {
+        } catch let error as RewardLoopAPIError where error.isAuthenticationFailure {
             try await refreshActiveSessionIfNeeded(force: true)
             return try await performRetriableBackendOperation(operation)
         }
     }
 
     private func performRetriableBackendOperation<Response>(
-        _ operation: (PulsePerksBackend) async throws -> Response
+        _ operation: (RewardLoopBackend) async throws -> Response
     ) async throws -> Response {
         do {
             return try await operation(backend)
-        } catch let error as PulsePerksAPIError where error.isTransientFailure {
+        } catch let error as RewardLoopAPIError where error.isTransientFailure {
             try await Task.sleep(nanoseconds: 300_000_000)
             return try await operation(backend)
         }
@@ -1100,7 +1144,7 @@ struct ContentView: View {
 
     @discardableResult
     private func syncActivity(
-        _ operation: (PulsePerksBackend) async throws -> MemberActivityResponse
+        _ operation: (RewardLoopBackend) async throws -> MemberActivityResponse
     ) async -> Bool {
         do {
             let activity = try await performAuthenticatedRequest(operation)
@@ -1121,7 +1165,7 @@ struct ContentView: View {
             let response = try await performAuthenticatedRequest { backend in
                 try await backend.updateProfile(request)
             }
-            store = PulsePerksStore(
+            store = RewardLoopStore(
                 memberProfile: MemberProfile(response: response),
                 categories: categories,
                 perks: perks,
@@ -2122,7 +2166,7 @@ private struct UserActivityCache: Codable {
 }
 
 private struct UserBootstrapCache: Codable {
-    let response: PulsePerksBootstrapResponse
+    let response: RewardLoopBootstrapResponse
     let cachedAt: Date
 
     static func load(userID: String) -> UserBootstrapCache? {
@@ -2136,7 +2180,7 @@ private struct UserBootstrapCache: Codable {
         return cache
     }
 
-    static func save(_ response: PulsePerksBootstrapResponse, userID: String) {
+    static func save(_ response: RewardLoopBootstrapResponse, userID: String) {
         let cache = UserBootstrapCache(response: response, cachedAt: Date())
         save(cache, userID: userID)
     }
@@ -2146,7 +2190,7 @@ private struct UserBootstrapCache: Codable {
             return
         }
 
-        let updatedResponse = PulsePerksBootstrapResponse(
+        let updatedResponse = RewardLoopBootstrapResponse(
             member: profile,
             rewards: cache.response.rewards,
             categories: cache.response.categories,
@@ -2164,7 +2208,7 @@ private struct UserBootstrapCache: Codable {
             return
         }
 
-        let updatedResponse = PulsePerksBootstrapResponse(
+        let updatedResponse = RewardLoopBootstrapResponse(
             member: cache.response.member,
             rewards: cache.response.rewards,
             categories: cache.response.categories,

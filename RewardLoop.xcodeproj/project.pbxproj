@@ -7,14 +7,14 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		DECA392330353142009A7A3A /* PulsePerksStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PulsePerksStoreTests.swift; sourceTree = "<group>"; };
+		DECA392330353142009A7A3A /* RewardLoopStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardLoopStoreTests.swift; sourceTree = "<group>"; };
 		DED01CF93032A96900DCDA8F /* RewardLoop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RewardLoop.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		DED01CFB3032A96900DCDA8F /* Pulse Perks */ = {
+		DED01CFB3032A96900DCDA8F /* RewardLoop */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "Pulse Perks";
+			path = RewardLoop;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -30,20 +30,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		DECA392230353142009A7A3A /* Pulse PerksTests */ = {
+		DECA392230353142009A7A3A /* RewardLooptests */ = {
 			isa = PBXGroup;
 			children = (
-				DECA392330353142009A7A3A /* PulsePerksStoreTests.swift */,
+				DECA392330353142009A7A3A /* RewardLoopStoreTests.swift */,
 			);
-			path = "Pulse PerksTests";
+			path = RewardLooptests;
 			sourceTree = "<group>";
 		};
 		DED01CF03032A96900DCDA8F = {
 			isa = PBXGroup;
 			children = (
-				DED01CFB3032A96900DCDA8F /* Pulse Perks */,
+				DED01CFB3032A96900DCDA8F /* RewardLoop */,
 				DED01CFA3032A96900DCDA8F /* Products */,
-				DECA392230353142009A7A3A /* Pulse PerksTests */,
+				DECA392230353142009A7A3A /* RewardLooptests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -58,9 +58,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		DED01CF83032A96900DCDA8F /* Pulse Perks */ = {
+		DED01CF83032A96900DCDA8F /* RewardLoop */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = DED01D043032A96A00DCDA8F /* Build configuration list for PBXNativeTarget "Pulse Perks" */;
+			buildConfigurationList = DED01D043032A96A00DCDA8F /* Build configuration list for PBXNativeTarget "RewardLoop" */;
 			buildPhases = (
 				DED01CF53032A96900DCDA8F /* Sources */,
 				DED01CF63032A96900DCDA8F /* Frameworks */,
@@ -71,9 +71,9 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				DED01CFB3032A96900DCDA8F /* Pulse Perks */,
+				DED01CFB3032A96900DCDA8F /* RewardLoop */,
 			);
-			name = "Pulse Perks";
+			name = RewardLoop;
 			packageProductDependencies = (
 			);
 			productName = "Pulse Perks";
@@ -95,7 +95,7 @@
 					};
 				};
 			};
-			buildConfigurationList = DED01CF43032A96900DCDA8F /* Build configuration list for PBXProject "Pulse Perks" */;
+			buildConfigurationList = DED01CF43032A96900DCDA8F /* Build configuration list for PBXProject "RewardLoop" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -109,7 +109,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				DED01CF83032A96900DCDA8F /* Pulse Perks */,
+				DED01CF83032A96900DCDA8F /* RewardLoop */,
 			);
 		};
 /* End PBXProject section */
@@ -340,7 +340,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		DED01CF43032A96900DCDA8F /* Build configuration list for PBXProject "Pulse Perks" */ = {
+		DED01CF43032A96900DCDA8F /* Build configuration list for PBXProject "RewardLoop" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				DED01D023032A96A00DCDA8F /* Debug */,
@@ -349,7 +349,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		DED01D043032A96A00DCDA8F /* Build configuration list for PBXNativeTarget "Pulse Perks" */ = {
+		DED01D043032A96A00DCDA8F /* Build configuration list for PBXNativeTarget "RewardLoop" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				DED01D053032A96A00DCDA8F /* Debug */,

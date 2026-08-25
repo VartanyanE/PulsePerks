@@ -1,14 +1,14 @@
 //
-//  PulsePerksStoreTests.swift
+//  RewardLoopStoreTests.swift
 //  RewardLoopTests
 //
 
 import Foundation
 import Testing
-@testable import Pulse_Perks
+@testable import RewardLoop
 
-struct PulsePerksStoreTests {
-    private let store = PulsePerksStore.demo
+struct RewardLoopStoreTests {
+    private let store = RewardLoopStore.demo
 
     @Test func filtersPerksByCategoryAndSearchText() {
         let results = store.filteredPerks(category: "Travel", searchText: "hotel", sort: .bestValue)
@@ -53,7 +53,7 @@ struct PulsePerksStoreTests {
     }
 
     @Test func normalizesUnsafeRewardsConfiguration() {
-        let unsafeStore = PulsePerksStore(
+        let unsafeStore = RewardLoopStore(
             memberProfile: .demo,
             categories: ["Food"],
             perks: [],
@@ -74,7 +74,7 @@ struct PulsePerksStoreTests {
     }
 
     @Test func progressValuesStayInSafeRange() {
-        let progressStore = PulsePerksStore(
+        let progressStore = RewardLoopStore(
             memberProfile: .demo,
             categories: ["All"],
             perks: [],
@@ -104,7 +104,7 @@ struct PulsePerksStoreTests {
     @Test func expiredPerksAreExcludedFromDiscoveryResults() {
         let activePerk = testPerk(id: "active-offer", title: "Active offer", daysUntilExpiration: 3)
         let expiredPerk = testPerk(id: "expired-offer", title: "Expired offer", daysUntilExpiration: 0)
-        let testStore = PulsePerksStore(
+        let testStore = RewardLoopStore(
             memberProfile: .demo,
             categories: ["All", "Retail"],
             perks: [expiredPerk, activePerk],
@@ -137,7 +137,7 @@ struct PulsePerksStoreTests {
             daysUntilExpiration: 2,
             estimatedSavings: 25
         )
-        let testStore = PulsePerksStore(
+        let testStore = RewardLoopStore(
             memberProfile: .demo,
             categories: ["All", "Retail"],
             perks: [highValueExpiredPerk, activePerk],
@@ -233,9 +233,9 @@ struct PulsePerksStoreTests {
     }
 
     @Test func apiErrorIdentifiesAuthenticationFailures() {
-        let unauthorizedError = PulsePerksAPIError.requestFailed(statusCode: 401, data: Data())
-        let forbiddenError = PulsePerksAPIError.requestFailed(statusCode: 403, data: Data())
-        let rateLimitError = PulsePerksAPIError.requestFailed(statusCode: 429, data: Data())
+        let unauthorizedError = RewardLoopAPIError.requestFailed(statusCode: 401, data: Data())
+        let forbiddenError = RewardLoopAPIError.requestFailed(statusCode: 403, data: Data())
+        let rateLimitError = RewardLoopAPIError.requestFailed(statusCode: 429, data: Data())
 
         #expect(unauthorizedError.isAuthenticationFailure)
         #expect(forbiddenError.isAuthenticationFailure)
@@ -305,10 +305,10 @@ struct PulsePerksStoreTests {
     }
 
     @Test func apiErrorIdentifiesTransientFailures() {
-        let timeoutError = PulsePerksAPIError.requestFailed(statusCode: 408, data: Data())
-        let serverError = PulsePerksAPIError.requestFailed(statusCode: 503, data: Data())
-        let authError = PulsePerksAPIError.requestFailed(statusCode: 401, data: Data())
-        let decodingError = PulsePerksAPIError.emptyResponse
+        let timeoutError = RewardLoopAPIError.requestFailed(statusCode: 408, data: Data())
+        let serverError = RewardLoopAPIError.requestFailed(statusCode: 503, data: Data())
+        let authError = RewardLoopAPIError.requestFailed(statusCode: 401, data: Data())
+        let decodingError = RewardLoopAPIError.emptyResponse
 
         #expect(timeoutError.isTransientFailure)
         #expect(serverError.isTransientFailure)
@@ -317,12 +317,12 @@ struct PulsePerksStoreTests {
     }
 
     @Test func apiErrorDescribesUnexpectedEmptyResponses() {
-        #expect(PulsePerksAPIError.emptyResponse.localizedDescription == "Backend returned an empty response")
+        #expect(RewardLoopAPIError.emptyResponse.localizedDescription == "Backend returned an empty response")
     }
 
     @Test func apiErrorSanitizesLongBackendMessages() {
         let noisyMessage = String(repeating: "Backend failed with details\n", count: 20)
-        let error = PulsePerksAPIError.requestFailed(statusCode: 500, data: Data(noisyMessage.utf8))
+        let error = RewardLoopAPIError.requestFailed(statusCode: 500, data: Data(noisyMessage.utf8))
         let description = error.localizedDescription
 
         #expect(!description.contains("\n"))
@@ -410,6 +410,28 @@ struct PulsePerksStoreTests {
         let session = try #require(PartnerSurveySession(response: response))
 
         #expect(!session.awardsPoints)
+    }
+
+    @Test func surveyCompletionRequestIncludesSubmittedAnswers() throws {
+        let request = SurveyCompletionRequest(
+            responses: [
+                SurveyAnswerRequest(
+                    questionIndex: 1,
+                    question: "Which rewards matter most?",
+                    answer: "Food and travel"
+                )
+            ]
+        )
+
+        let data = try JSONEncoder().encode(request)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let responses = try #require(object["responses"] as? [[String: Any]])
+        let firstResponse = try #require(responses.first)
+
+        #expect(responses.count == 1)
+        #expect(firstResponse["questionIndex"] as? Int == 1)
+        #expect(firstResponse["question"] as? String == "Which rewards matter most?")
+        #expect(firstResponse["answer"] as? String == "Food and travel")
     }
 
     private func testPerk(

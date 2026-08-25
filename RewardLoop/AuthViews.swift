@@ -81,7 +81,7 @@ struct RootView: View {
         do {
             refreshedSession = try await SupabaseAuthClient(configuration: configuration)
                 .refreshSession(authSession)
-        } catch let error as PulsePerksAPIError where error.isRefreshSessionFailure {
+        } catch let error as RewardLoopAPIError where error.isRefreshSessionFailure {
             clearLocalSession(for: authSession)
             authStatusMessage = SupabaseAuthError.sessionExpired.localizedDescription
             throw SupabaseAuthError.sessionExpired
@@ -317,7 +317,7 @@ private struct OnboardingView: View {
 
         Task {
             do {
-                let backend = SupabasePulsePerksClient(configuration: configuration)
+                let backend = SupabaseRewardLoopClient(configuration: configuration)
                 _ = try await backend.fetchBootstrap()
                 _ = try await backend.updatePreferences(
                     PreferencesUpdateRequest(

@@ -1,5 +1,5 @@
 //
-//  PulsePerksBackend.swift
+//  RewardLoopBackend.swift
 //  RewardLoop
 //
 
@@ -8,8 +8,8 @@ import Foundation
 private let backendRequestTimeout: TimeInterval = 20
 private let maximumUserFacingBackendMessageLength = 240
 
-protocol PulsePerksBackend {
-    func fetchBootstrap() async throws -> PulsePerksBootstrapResponse
+protocol RewardLoopBackend {
+    func fetchBootstrap() async throws -> RewardLoopBootstrapResponse
     func fetchPartnerSurveyOffers() async throws -> [PartnerSurveyOfferResponse]
     func fetchPartnerSurveySessions() async throws -> [PartnerSurveySessionResponse]
     func startPartnerSurvey(offerID: String) async throws -> PartnerSurveySessionResponse
@@ -22,11 +22,11 @@ protocol PulsePerksBackend {
     func updateProfile(_ request: ProfileUpdateRequest) async throws -> MemberProfileResponse
 }
 
-struct SupabasePulsePerksClient: PulsePerksBackend {
+struct SupabaseRewardLoopClient: RewardLoopBackend {
     var configuration: SupabaseConfiguration
     var session: URLSession = .shared
 
-    func fetchBootstrap() async throws -> PulsePerksBootstrapResponse {
+    func fetchBootstrap() async throws -> RewardLoopBootstrapResponse {
         try await ensureMemberProfile()
 
         let memberProfile: MemberProfileResponse = try await fetchSingle(
@@ -73,7 +73,7 @@ struct SupabasePulsePerksClient: PulsePerksBackend {
         )
         let activity = try await fetchActivity()
 
-        return PulsePerksBootstrapResponse(
+        return RewardLoopBootstrapResponse(
             member: memberProfile,
             rewards: rewards,
             categories: rewards.categories,
@@ -136,7 +136,7 @@ struct SupabasePulsePerksClient: PulsePerksBackend {
         )
 
         guard URL.supportedOfferURL(from: offer.entryURL) != nil else {
-            throw PulsePerksAPIError.invalidURL
+            throw RewardLoopAPIError.invalidURL
         }
 
         let row = PartnerSurveySessionRow(
@@ -387,7 +387,7 @@ struct SupabasePulsePerksClient: PulsePerksBackend {
         components?.queryItems = queryItems
 
         guard let url = components?.url else {
-            throw PulsePerksAPIError.invalidURL
+            throw RewardLoopAPIError.invalidURL
         }
 
         var request = URLRequest(url: url)
@@ -412,26 +412,26 @@ struct SupabasePulsePerksClient: PulsePerksBackend {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
-            throw PulsePerksAPIError.networkFailed(error)
+            throw RewardLoopAPIError.networkFailed(error)
         }
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw PulsePerksAPIError.invalidResponse
+            throw RewardLoopAPIError.invalidResponse
         }
 
         guard 200..<300 ~= httpResponse.statusCode else {
-            throw PulsePerksAPIError.requestFailed(statusCode: httpResponse.statusCode, data: data)
+            throw RewardLoopAPIError.requestFailed(statusCode: httpResponse.statusCode, data: data)
         }
 
         return try decodeBackendResponse(Response.self, from: data, using: .supabase)
     }
 }
 
-struct PulsePerksAPIClient: PulsePerksBackend {
+struct RewardLoopAPIClient: RewardLoopBackend {
     var configuration: BackendConfiguration
     var session: URLSession = .shared
 
-    func fetchBootstrap() async throws -> PulsePerksBootstrapResponse {
+    func fetchBootstrap() async throws -> RewardLoopBootstrapResponse {
         try await send(path: "/v1/bootstrap", method: "GET")
     }
 
@@ -468,7 +468,11 @@ struct PulsePerksAPIClient: PulsePerksBackend {
     }
 
     func completeSurvey(id: String, responses: [SurveyAnswerRequest]) async throws -> MemberActivityResponse {
-        try await send(path: "/v1/me/surveys/\(id)/completion", method: "POST")
+        try await send(
+            path: "/v1/me/surveys/\(id)/completion",
+            method: "POST",
+            body: SurveyCompletionRequest(responses: responses)
+        )
     }
 
     func syncActivity(_ activity: MemberActivityResponse) async throws -> MemberActivityResponse {
@@ -497,7 +501,7 @@ struct PulsePerksAPIClient: PulsePerksBackend {
         body: RequestBody?
     ) async throws -> Response {
         guard let url = URL(string: path, relativeTo: configuration.baseURL) else {
-            throw PulsePerksAPIError.invalidURL
+            throw RewardLoopAPIError.invalidURL
         }
 
         var request = URLRequest(url: url)
@@ -520,15 +524,15 @@ struct PulsePerksAPIClient: PulsePerksBackend {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
-            throw PulsePerksAPIError.networkFailed(error)
+            throw RewardLoopAPIError.networkFailed(error)
         }
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw PulsePerksAPIError.invalidResponse
+            throw RewardLoopAPIError.invalidResponse
         }
 
         guard 200..<300 ~= httpResponse.statusCode else {
-            throw PulsePerksAPIError.requestFailed(statusCode: httpResponse.statusCode, data: data)
+            throw RewardLoopAPIError.requestFailed(statusCode: httpResponse.statusCode, data: data)
         }
 
         return try decodeBackendResponse(Response.self, from: data, using: .pulsePerks)
@@ -638,7 +642,7 @@ struct SupabaseAuthClient {
         components?.queryItems = queryItems.isEmpty ? nil : queryItems
 
         guard let url = components?.url else {
-            throw PulsePerksAPIError.invalidURL
+            throw RewardLoopAPIError.invalidURL
         }
 
         var request = URLRequest(url: url)
@@ -659,15 +663,15 @@ struct SupabaseAuthClient {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
-            throw PulsePerksAPIError.networkFailed(error)
+            throw RewardLoopAPIError.networkFailed(error)
         }
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw PulsePerksAPIError.invalidResponse
+            throw RewardLoopAPIError.invalidResponse
         }
 
         guard 200..<300 ~= httpResponse.statusCode else {
-            throw PulsePerksAPIError.requestFailed(statusCode: httpResponse.statusCode, data: data)
+            throw RewardLoopAPIError.requestFailed(statusCode: httpResponse.statusCode, data: data)
         }
 
         return try decodeBackendResponse(Response.self, from: data, using: .supabase)
@@ -682,7 +686,7 @@ private func decodeBackendResponse<Response: Decodable>(
     if data.isEmpty {
         guard let emptyResponseType = responseType as? EmptyBackendResponse.Type,
               let response = emptyResponseType.init() as? Response else {
-            throw PulsePerksAPIError.emptyResponse
+            throw RewardLoopAPIError.emptyResponse
         }
 
         return response
@@ -691,7 +695,7 @@ private func decodeBackendResponse<Response: Decodable>(
     do {
         return try decoder.decode(Response.self, from: data)
     } catch {
-        throw PulsePerksAPIError.decodingFailed(error)
+        throw RewardLoopAPIError.decodingFailed(error)
     }
 }
 
@@ -815,7 +819,7 @@ struct AuthSession: Codable, Equatable, Sendable {
     }
 }
 
-enum PulsePerksAPIError: Error, Equatable {
+enum RewardLoopAPIError: Error, Equatable {
     case invalidURL
     case invalidResponse
     case emptyResponse
@@ -823,7 +827,7 @@ enum PulsePerksAPIError: Error, Equatable {
     case decodingFailed(Error)
     case networkFailed(Error)
 
-    static func == (lhs: PulsePerksAPIError, rhs: PulsePerksAPIError) -> Bool {
+    static func == (lhs: RewardLoopAPIError, rhs: RewardLoopAPIError) -> Bool {
         switch (lhs, rhs) {
         case (.invalidURL, .invalidURL), (.invalidResponse, .invalidResponse), (.emptyResponse, .emptyResponse):
             true
@@ -837,7 +841,7 @@ enum PulsePerksAPIError: Error, Equatable {
     }
 }
 
-extension PulsePerksAPIError: LocalizedError {
+extension RewardLoopAPIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidURL:
@@ -868,7 +872,7 @@ extension PulsePerksAPIError: LocalizedError {
     }
 }
 
-extension PulsePerksAPIError {
+extension RewardLoopAPIError {
     var isAuthenticationFailure: Bool {
         guard case let .requestFailed(statusCode, _) = self else {
             return false
@@ -1006,7 +1010,7 @@ extension SupabaseAuthError: LocalizedError {
     }
 }
 
-struct PulsePerksBootstrapResponse: Codable, Equatable, Sendable {
+struct RewardLoopBootstrapResponse: Codable, Equatable, Sendable {
     let member: MemberProfileResponse
     let rewards: RewardsConfigurationResponse
     let categories: [String]
@@ -1339,6 +1343,10 @@ struct SurveyAnswerRequest: Encodable, Equatable, Sendable {
     let questionIndex: Int
     let question: String
     let answer: String
+}
+
+struct SurveyCompletionRequest: Encodable, Equatable, Sendable {
+    let responses: [SurveyAnswerRequest]
 }
 
 private struct PerkRedemptionRow: Codable, Equatable, Sendable {

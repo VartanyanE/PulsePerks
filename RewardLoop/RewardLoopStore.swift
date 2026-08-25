@@ -1,12 +1,12 @@
 //
-//  PulsePerksStore.swift
+//  RewardLoopStore.swift
 //  RewardLoop
 //
 
 import Foundation
 import SwiftUI
 
-struct PulsePerksStore {
+struct RewardLoopStore {
     let memberProfile: MemberProfile
     let categories: [String]
     let perks: [Perk]
@@ -21,7 +21,7 @@ struct PulsePerksStore {
     private static let minimumRewardGoal = 1
     private static let minimumSurveyGoal = 1
 
-    static let demo = PulsePerksStore(
+    static let demo = RewardLoopStore(
         memberProfile: .demo,
         categories: ["All", "Food", "Fitness", "Travel", "Retail"],
         perks: Perk.sampleData,
@@ -35,7 +35,7 @@ struct PulsePerksStore {
     )
 
     @MainActor
-    init(response: PulsePerksBootstrapResponse) {
+    init(response: RewardLoopBootstrapResponse) {
         memberProfile = MemberProfile(response: response.member)
         categories = response.categories
         perks = response.perks.map(Perk.init(response:))
