@@ -229,6 +229,53 @@ private extension Perk {
     }
 }
 
+extension PartnerSurveyOffer {
+    init?(response: PartnerSurveyOfferResponse) {
+        guard let entryURL = URL.supportedOfferURL(from: response.entryURL) else {
+            return nil
+        }
+
+        self.init(
+            id: response.id,
+            provider: response.provider,
+            title: response.title,
+            description: response.description,
+            estimatedTime: response.estimatedTime,
+            rewardPoints: max(response.rewardPoints, 0),
+            category: response.category,
+            matchScore: min(max(response.matchScore, 0), 99),
+            entryURL: entryURL,
+            disclosure: response.disclosure
+        )
+    }
+}
+
+extension PartnerSurveySession {
+    init?(response: PartnerSurveySessionResponse) {
+        guard let entryURL = URL.supportedOfferURL(from: response.entryURL) else {
+            return nil
+        }
+
+        self.init(
+            id: response.id,
+            offerID: response.offerID,
+            provider: response.provider,
+            status: response.status,
+            rewardPoints: max(response.rewardPoints, 0),
+            entryURL: entryURL,
+            startedAt: Self.parseDate(response.startedAt),
+            completedAt: response.completedAt.flatMap(Self.parseDate)
+        )
+    }
+
+    nonisolated private static func parseDate(_ value: String) -> Date? {
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        return fractionalFormatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    }
+}
+
 private extension Color {
     init(hex: String) {
         let normalizedHex = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))

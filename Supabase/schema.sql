@@ -100,6 +100,26 @@ create table if not exists public.surveys (
     display_order integer not null default 0
 );
 
+create table if not exists public.partner_survey_offers (
+    id text primary key,
+    provider text not null default 'pure_spectrum',
+    provider_survey_id text not null,
+    title text not null,
+    description text not null,
+    estimated_time text not null,
+    reward_points integer not null default 0,
+    category text not null default 'Surveys',
+    match_score integer not null default 0,
+    entry_url text not null,
+    disclosure text not null default 'Points are awarded after the survey partner confirms completion.',
+    is_active boolean not null default true,
+    display_order integer not null default 0,
+    created_at timestamptz not null default now(),
+    constraint partner_survey_offers_reward_points_check check (reward_points >= 0),
+    constraint partner_survey_offers_match_score_check check (match_score between 0 and 99),
+    constraint partner_survey_offers_entry_url_check check (entry_url ~* '^https?://')
+);
+
 create table if not exists public.survey_responses (
     member_id text not null references public.member_profiles(id) on delete cascade,
     survey_id text not null references public.surveys(id) on delete cascade,
@@ -124,6 +144,39 @@ create table if not exists public.saved_perks (
     primary key (member_id, perk_id)
 );
 
+create table if not exists public.partner_survey_sessions (
+    id uuid primary key default gen_random_uuid(),
+    member_id text not null references public.member_profiles(id) on delete cascade,
+    offer_id text not null references public.partner_survey_offers(id) on delete cascade,
+    provider text not null,
+    provider_survey_id text not null,
+    status text not null default 'started',
+    reward_points integer not null default 0,
+    entry_url text not null,
+    started_at timestamptz not null default now(),
+    completed_at timestamptz,
+    constraint partner_survey_sessions_status_check check (status in ('started', 'completed', 'screened_out', 'quota_full', 'failed')),
+    constraint partner_survey_sessions_reward_points_check check (reward_points >= 0),
+    constraint partner_survey_sessions_entry_url_check check (entry_url ~* '^https?://')
+);
+
+create table if not exists public.partner_survey_postback_events (
+    id uuid primary key default gen_random_uuid(),
+    session_id uuid references public.partner_survey_sessions(id) on delete set null,
+    provider text not null,
+    provider_survey_id text,
+    provider_status text not null,
+    reward_points integer,
+    raw_payload jsonb not null default '{}'::jsonb,
+    received_at timestamptz not null default now()
+);
+
+create index if not exists partner_survey_sessions_member_started_at_idx
+on public.partner_survey_sessions (member_id, started_at desc);
+
+create index if not exists partner_survey_postback_events_session_id_idx
+on public.partner_survey_postback_events (session_id);
+
 alter table public.app_config enable row level security;
 alter table public.member_profiles enable row level security;
 alter table public.member_activity enable row level security;
@@ -131,9 +184,12 @@ alter table public.interests enable row level security;
 alter table public.perks enable row level security;
 alter table public.perk_collections enable row level security;
 alter table public.surveys enable row level security;
+alter table public.partner_survey_offers enable row level security;
 alter table public.survey_responses enable row level security;
 alter table public.perk_redemptions enable row level security;
 alter table public.saved_perks enable row level security;
+alter table public.partner_survey_sessions enable row level security;
+alter table public.partner_survey_postback_events enable row level security;
 
 drop policy if exists "Read app config" on public.app_config;
 create policy "Read app config" on public.app_config for select using (true);
@@ -175,6 +231,10 @@ create policy "Read perk collections" on public.perk_collections for select usin
 drop policy if exists "Read surveys" on public.surveys;
 create policy "Read surveys" on public.surveys for select using (true);
 
+drop policy if exists "Read active partner survey offers" on public.partner_survey_offers;
+create policy "Read active partner survey offers" on public.partner_survey_offers
+for select using (is_active = true);
+
 drop policy if exists "Read own survey responses" on public.survey_responses;
 create policy "Read own survey responses" on public.survey_responses
 for select using (member_id = auth.uid()::text);
@@ -212,6 +272,14 @@ with check (member_id = auth.uid()::text);
 drop policy if exists "Delete own saved perks" on public.saved_perks;
 create policy "Delete own saved perks" on public.saved_perks
 for delete using (member_id = auth.uid()::text);
+
+drop policy if exists "Read own partner survey sessions" on public.partner_survey_sessions;
+create policy "Read own partner survey sessions" on public.partner_survey_sessions
+for select using (member_id = auth.uid()::text);
+
+drop policy if exists "Insert own partner survey sessions" on public.partner_survey_sessions;
+create policy "Insert own partner survey sessions" on public.partner_survey_sessions
+for insert with check (member_id = auth.uid()::text);
 
 insert into public.app_config (
     id,
@@ -367,3 +435,45 @@ on conflict (id) do update set
     tint_hex = excluded.tint_hex,
     display_order = excluded.display_order,
     is_active = true;
+
+insert into public.partner_survey_offers (
+    id,
+    provider,
+    provider_survey_id,
+    title,
+    description,
+    estimated_time,
+    reward_points,
+    category,
+    match_score,
+    entry_url,
+    disclosure,
+    display_order,
+    is_active
+) values (
+    'pure-spectrum-demo-1',
+    'pure_spectrum',
+    'demo-1',
+    'Partner lifestyle survey',
+    'Answer a short partner survey and earn points after completion is confirmed.',
+    '7 min',
+    120,
+    'Lifestyle',
+    92,
+    'https://spectrumsurveys.com/startSurvey?survey_id=demo-1',
+    'This survey opens with a partner. Points are awarded only after confirmed completion.',
+    10,
+    true
+) on conflict (id) do update set
+    provider = excluded.provider,
+    provider_survey_id = excluded.provider_survey_id,
+    title = excluded.title,
+    description = excluded.description,
+    estimated_time = excluded.estimated_time,
+    reward_points = excluded.reward_points,
+    category = excluded.category,
+    match_score = excluded.match_score,
+    entry_url = excluded.entry_url,
+    disclosure = excluded.disclosure,
+    display_order = excluded.display_order,
+    is_active = excluded.is_active;

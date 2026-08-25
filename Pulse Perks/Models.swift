@@ -39,6 +39,86 @@ struct OfferClickHistoryEntry: Identifiable, Codable, Equatable {
     }
 }
 
+struct PartnerSurveyOffer: Identifiable, Equatable {
+    let id: String
+    let provider: PartnerSurveyProvider
+    let title: String
+    let description: String
+    let estimatedTime: String
+    let rewardPoints: Int
+    let category: String
+    let matchScore: Int
+    let entryURL: URL
+    let disclosure: String
+}
+
+struct PartnerSurveySession: Identifiable, Equatable {
+    let id: String
+    let offerID: String
+    let provider: PartnerSurveyProvider
+    let status: PartnerSurveySessionStatus
+    let rewardPoints: Int
+    let entryURL: URL
+    let startedAt: Date?
+    let completedAt: Date?
+
+    var awardsPoints: Bool {
+        status == .completed
+    }
+}
+
+enum PartnerSurveyProvider: String, Codable, Equatable, Sendable {
+    case pureSpectrum = "pure_spectrum"
+    case other
+
+    var title: String {
+        switch self {
+        case .pureSpectrum:
+            "PureSpectrum"
+        case .other:
+            "Partner"
+        }
+    }
+}
+
+enum PartnerSurveySessionStatus: String, Codable, Equatable, Sendable {
+    case started
+    case completed
+    case screenedOut = "screened_out"
+    case quotaFull = "quota_full"
+    case failed
+
+    var title: String {
+        switch self {
+        case .started:
+            "Started"
+        case .completed:
+            "Completed"
+        case .screenedOut:
+            "Screened out"
+        case .quotaFull:
+            "Quota full"
+        case .failed:
+            "Failed"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .started:
+            "arrow.up.forward.app"
+        case .completed:
+            "checkmark.seal"
+        case .screenedOut:
+            "person.crop.circle.badge.xmark"
+        case .quotaFull:
+            "tray.full"
+        case .failed:
+            "exclamationmark.triangle"
+        }
+    }
+}
+
 enum NotificationDestination {
     case surveys
     case wallet

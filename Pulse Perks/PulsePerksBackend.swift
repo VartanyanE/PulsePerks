@@ -10,6 +10,9 @@ private let maximumUserFacingBackendMessageLength = 240
 
 protocol PulsePerksBackend {
     func fetchBootstrap() async throws -> PulsePerksBootstrapResponse
+    func fetchPartnerSurveyOffers() async throws -> [PartnerSurveyOfferResponse]
+    func fetchPartnerSurveySessions() async throws -> [PartnerSurveySessionResponse]
+    func startPartnerSurvey(offerID: String) async throws -> PartnerSurveySessionResponse
     func savePerk(id: String, isSaved: Bool) async throws -> MemberActivityResponse
     func redeemPerk(id: String) async throws -> MemberActivityResponse
     func trackOfferClick(perkID: String, offerURL: URL) async throws
@@ -98,6 +101,68 @@ struct SupabasePulsePerksClient: PulsePerksBackend {
             body: profile,
             prefer: "resolution=ignore-duplicates,return=minimal"
         )
+    }
+
+    func fetchPartnerSurveyOffers() async throws -> [PartnerSurveyOfferResponse] {
+        try await fetchTable(
+            "partner_survey_offers",
+            queryItems: [
+                URLQueryItem(name: "is_active", value: "eq.true"),
+                URLQueryItem(name: "order", value: "display_order.asc")
+            ]
+        )
+    }
+
+    func fetchPartnerSurveySessions() async throws -> [PartnerSurveySessionResponse] {
+        let rows: [PartnerSurveySessionRow] = try await fetchTable(
+            "partner_survey_sessions",
+            queryItems: [
+                URLQueryItem(name: "member_id", value: "eq.\(configuration.memberID)"),
+                URLQueryItem(name: "order", value: "started_at.desc")
+            ]
+        )
+
+        return rows.map(\.response)
+    }
+
+    func startPartnerSurvey(offerID: String) async throws -> PartnerSurveySessionResponse {
+        let offer: PartnerSurveyOfferResponse = try await fetchSingle(
+            table: "partner_survey_offers",
+            queryItems: [
+                URLQueryItem(name: "id", value: "eq.\(offerID)"),
+                URLQueryItem(name: "is_active", value: "eq.true"),
+                URLQueryItem(name: "limit", value: "1")
+            ]
+        )
+
+        guard URL.supportedOfferURL(from: offer.entryURL) != nil else {
+            throw PulsePerksAPIError.invalidURL
+        }
+
+        let row = PartnerSurveySessionRow(
+            memberID: configuration.memberID,
+            offerID: offer.id,
+            provider: offer.provider,
+            providerSurveyID: offer.providerSurveyID,
+            status: .started,
+            rewardPoints: offer.rewardPoints,
+            entryURL: offer.entryURL,
+            startedAt: ISO8601DateFormatter().string(from: Date())
+        )
+
+        let rows: [PartnerSurveySessionRow] = try await send(
+            table: "partner_survey_sessions",
+            method: "POST",
+            queryItems: [],
+            body: row,
+            prefer: "return=representation"
+        )
+
+        guard let savedRow = rows.first else {
+            throw SupabaseError.emptyResponse
+        }
+
+        return savedRow.response
     }
 
     func savePerk(id: String, isSaved: Bool) async throws -> MemberActivityResponse {
@@ -368,6 +433,18 @@ struct PulsePerksAPIClient: PulsePerksBackend {
 
     func fetchBootstrap() async throws -> PulsePerksBootstrapResponse {
         try await send(path: "/v1/bootstrap", method: "GET")
+    }
+
+    func fetchPartnerSurveyOffers() async throws -> [PartnerSurveyOfferResponse] {
+        try await send(path: "/v1/me/partner-surveys", method: "GET")
+    }
+
+    func fetchPartnerSurveySessions() async throws -> [PartnerSurveySessionResponse] {
+        try await send(path: "/v1/me/partner-survey-sessions", method: "GET")
+    }
+
+    func startPartnerSurvey(offerID: String) async throws -> PartnerSurveySessionResponse {
+        try await send(path: "/v1/me/partner-surveys/\(offerID)/sessions", method: "POST")
     }
 
     func savePerk(id: String, isSaved: Bool) async throws -> MemberActivityResponse {
@@ -1140,6 +1217,56 @@ struct InterestResponse: Codable, Equatable, Sendable {
     }
 }
 
+struct PartnerSurveyOfferResponse: Codable, Equatable, Sendable {
+    let id: String
+    let provider: PartnerSurveyProvider
+    let providerSurveyID: String
+    let title: String
+    let description: String
+    let estimatedTime: String
+    let rewardPoints: Int
+    let category: String
+    let matchScore: Int
+    let entryURL: String
+    let disclosure: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case provider
+        case providerSurveyID = "provider_survey_id"
+        case title
+        case description
+        case estimatedTime = "estimated_time"
+        case rewardPoints = "reward_points"
+        case category
+        case matchScore = "match_score"
+        case entryURL = "entry_url"
+        case disclosure
+    }
+}
+
+struct PartnerSurveySessionResponse: Codable, Equatable, Sendable {
+    let id: String
+    let offerID: String
+    let provider: PartnerSurveyProvider
+    let status: PartnerSurveySessionStatus
+    let rewardPoints: Int
+    let entryURL: String
+    let startedAt: String
+    let completedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case offerID = "offer_id"
+        case provider
+        case status
+        case rewardPoints = "reward_points"
+        case entryURL = "entry_url"
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+    }
+}
+
 private struct MemberProfileRow: Encodable, Equatable, Sendable {
     let id: String
     let name: String
@@ -1245,6 +1372,67 @@ private struct OfferClickRequest: Encodable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case offerURL = "offer_url"
+    }
+}
+
+private struct PartnerSurveySessionRow: Codable, Equatable, Sendable {
+    let id: String?
+    let memberID: String
+    let offerID: String
+    let provider: PartnerSurveyProvider
+    let providerSurveyID: String
+    let status: PartnerSurveySessionStatus
+    let rewardPoints: Int
+    let entryURL: String
+    let startedAt: String
+    let completedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case memberID = "member_id"
+        case offerID = "offer_id"
+        case provider
+        case providerSurveyID = "provider_survey_id"
+        case status
+        case rewardPoints = "reward_points"
+        case entryURL = "entry_url"
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+    }
+
+    init(
+        memberID: String,
+        offerID: String,
+        provider: PartnerSurveyProvider,
+        providerSurveyID: String,
+        status: PartnerSurveySessionStatus,
+        rewardPoints: Int,
+        entryURL: String,
+        startedAt: String
+    ) {
+        id = nil
+        self.memberID = memberID
+        self.offerID = offerID
+        self.provider = provider
+        self.providerSurveyID = providerSurveyID
+        self.status = status
+        self.rewardPoints = rewardPoints
+        self.entryURL = entryURL
+        self.startedAt = startedAt
+        completedAt = nil
+    }
+
+    var response: PartnerSurveySessionResponse {
+        PartnerSurveySessionResponse(
+            id: id ?? "",
+            offerID: offerID,
+            provider: provider,
+            status: status,
+            rewardPoints: rewardPoints,
+            entryURL: entryURL,
+            startedAt: startedAt,
+            completedAt: completedAt
+        )
     }
 }
 

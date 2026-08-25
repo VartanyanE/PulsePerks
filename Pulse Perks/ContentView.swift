@@ -33,11 +33,14 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var selectedPerk: Perk?
     @State private var selectedSurvey: Survey?
+    @State private var pendingPartnerSurvey: PartnerSurveyOffer?
     @State private var isShowingNotifications = false
     @State private var isShowingProfileEditor = false
     @State private var isShowingAffiliateDisclosure = false
+    @State private var isShowingPrivacyDisclosure = false
     @State private var isConfirmingClearOfferHistory = false
     @State private var isConfirmingOpenOffer = false
+    @State private var isConfirmingPartnerSurvey = false
     @State private var diagnosticsStatusMessage: String?
     @State private var pendingOfferToOpen: Perk?
     @State private var redeemedPerkIDsValue: String
@@ -54,10 +57,16 @@ struct ContentView: View {
     @State private var redeemingPerkIDs = Set<String>()
     @State private var savingPerkIDs = Set<String>()
     @State private var completingSurveyIDs = Set<String>()
+    @State private var startingPartnerSurveyIDs = Set<String>()
     @State private var localActivityModifiedAt: Date?
     @State private var hasPendingPreferenceSync = false
 
     @State private var store = PulsePerksStore.demo
+    @State private var partnerSurveyOffers = [PartnerSurveyOffer]()
+    @State private var partnerSurveySessions = [PartnerSurveySession]()
+    @State private var partnerSurveyStatusMessage = "Partner surveys are loading."
+    @State private var partnerSurveyState = PartnerSurveyConnectionState.loading
+    @State private var isLoadingPartnerSurveys = false
     @State private var backendState = BackendState.notConfigured
     @State private var backendStatusDetail = "Using local demo data"
     @State private var isLoadingBootstrap = false
@@ -216,6 +225,9 @@ struct ContentView: View {
         .sheet(isPresented: $isShowingAffiliateDisclosure) {
             AffiliateDisclosureView()
         }
+        .sheet(isPresented: $isShowingPrivacyDisclosure) {
+            PrivacyDisclosureView()
+        }
         .confirmationDialog(
             "Clear local offer history?",
             isPresented: $isConfirmingClearOfferHistory,
@@ -246,8 +258,25 @@ struct ContentView: View {
         } message: {
             Text(openOfferConfirmationMessage)
         }
+        .confirmationDialog(
+            "Start partner survey?",
+            isPresented: $isConfirmingPartnerSurvey,
+            titleVisibility: .visible
+        ) {
+            if let pendingPartnerSurvey {
+                Button("Start \(pendingPartnerSurvey.provider.title) survey") {
+                    startPartnerSurvey(pendingPartnerSurvey)
+                }
+            }
+
+            Button("Cancel", role: .cancel) {
+                pendingPartnerSurvey = nil
+            }
+        } message: {
+            Text(partnerSurveyConfirmationMessage)
+        }
         .task {
-            await loadBootstrap()
+            await refreshAppData()
         }
         .onChange(of: authSession) { _, newSession in
             activeAuthSession = newSession
@@ -287,7 +316,7 @@ struct ContentView: View {
                 .padding(20)
             }
             .refreshable {
-                await loadBootstrap()
+                await refreshAppData()
             }
             .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("RewardLoop")
@@ -300,13 +329,14 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     syncStatusBanner
                     surveysHero
+                    partnerSurveysSection
                     surveySection(title: "Available surveys", surveys: availableSurveys, isCompleted: false)
                     surveySection(title: "Completed", surveys: completedSurveys, isCompleted: true)
                 }
                 .padding(20)
             }
             .refreshable {
-                await loadBootstrap()
+                await refreshAppData()
             }
             .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Surveys")
@@ -371,24 +401,45 @@ struct ContentView: View {
         store.completedSurveys(completedIDs: completedSurveyIDs)
     }
 
+    private var partnerSurveyPotentialPoints: Int {
+        partnerSurveyOffers.reduce(0) { total, offer in
+            total + offer.rewardPoints
+        }
+    }
+
+    private var completedPartnerSurveySessions: [PartnerSurveySession] {
+        partnerSurveySessions.filter(\.awardsPoints)
+    }
+
+    private var completedPartnerSurveyPoints: Int {
+        completedPartnerSurveySessions.reduce(0) { total, session in
+            total + session.rewardPoints
+        }
+    }
+
     private var surveyPoints: Int {
         store.surveyPoints(completedIDs: completedSurveyIDs)
     }
 
+    private var totalSurveyPoints: Int {
+        surveyPoints + completedPartnerSurveyPoints
+    }
+
     private var dailySurveyGoalProgress: Double {
-        store.dailySurveyGoalProgress(completedIDs: completedSurveyIDs)
+        min(Double(totalSurveyPoints) / Double(dailySurveyGoal), 1)
     }
 
     private var rewardProgress: Double {
-        store.rewardProgress(redeemedPerkIDs: redeemedPerkIDs, completedSurveyIDs: completedSurveyIDs)
+        min(Double(memberPoints) / Double(nextRewardPoints), 1)
     }
 
     private var memberPoints: Int {
         store.memberPoints(redeemedPerkIDs: redeemedPerkIDs, completedSurveyIDs: completedSurveyIDs)
+            + completedPartnerSurveyPoints
     }
 
     private var pointsUntilNextReward: Int {
-        store.pointsUntilNextReward(redeemedPerkIDs: redeemedPerkIDs, completedSurveyIDs: completedSurveyIDs)
+        max(nextRewardPoints - memberPoints, 0)
     }
 
     private var savedValue: Int {
@@ -444,6 +495,7 @@ struct ContentView: View {
         !redeemingPerkIDs.isEmpty
             || !savingPerkIDs.isEmpty
             || !completingSurveyIDs.isEmpty
+            || !startingPartnerSurveyIDs.isEmpty
             || hasPendingPreferenceSync
     }
 
@@ -460,6 +512,10 @@ struct ContentView: View {
 
         if !completingSurveyIDs.isEmpty {
             parts.append("\(completingSurveyIDs.count) survey \(completingSurveyIDs.count == 1 ? "submission" : "submissions")")
+        }
+
+        if !startingPartnerSurveyIDs.isEmpty {
+            parts.append("\(startingPartnerSurveyIDs.count) partner survey \(startingPartnerSurveyIDs.count == 1 ? "start" : "starts")")
         }
 
         if hasPendingPreferenceSync {
@@ -725,12 +781,17 @@ struct ContentView: View {
             "Last refresh: \(lastSyncStatus)",
             "Backend host: \(backendHost)",
             "Sync queue: \(syncQueueStatus)",
+            "Partner survey source: \(partnerSurveyState.title)",
             "Saved perks: \(savedPerks.count)",
             "Redeemed perks: \(redeemedPerks.count)",
             "Completed surveys: \(completedSurveyIDs.count)",
+            "Completed partner surveys: \(completedPartnerSurveySessions.count)",
+            "Completed partner survey points: \(completedPartnerSurveyPoints)",
             "Offer clicks: \(offerClickCount)",
             "Active perks: \(perks.count)",
-            "Available surveys: \(availableSurveys.count)"
+            "Available surveys: \(availableSurveys.count)",
+            "Partner surveys: \(partnerSurveyOffers.count)",
+            "Partner survey status: \(partnerSurveyStatusMessage)"
         ]
         .joined(separator: "\n")
 
@@ -797,12 +858,104 @@ struct ContentView: View {
         }
     }
 
+    private func refreshAppData() async {
+        await loadBootstrap()
+        await loadPartnerSurveyOffers()
+    }
+
+    private func loadPartnerSurveyOffers() async {
+        guard !isLoadingPartnerSurveys else {
+            return
+        }
+
+        isLoadingPartnerSurveys = true
+        defer {
+            isLoadingPartnerSurveys = false
+        }
+
+        do {
+            async let offerResponses = performAuthenticatedRequest { backend in
+                try await backend.fetchPartnerSurveyOffers()
+            }
+            async let sessionResponses = performAuthenticatedRequest { backend in
+                try await backend.fetchPartnerSurveySessions()
+            }
+
+            partnerSurveyOffers = try await offerResponses.compactMap(PartnerSurveyOffer.init(response:))
+            partnerSurveySessions = try await sessionResponses.compactMap(PartnerSurveySession.init(response:))
+            if partnerSurveyOffers.isEmpty {
+                partnerSurveyState = .empty
+                partnerSurveyStatusMessage = "No partner surveys are available right now."
+            } else {
+                partnerSurveyState = .connected
+                partnerSurveyStatusMessage = "\(partnerSurveyOffers.count) partner \(partnerSurveyOffers.count == 1 ? "survey" : "surveys") available."
+            }
+        } catch {
+            partnerSurveyOffers = []
+            partnerSurveySessions = []
+            partnerSurveyState = .unavailable
+            partnerSurveyStatusMessage = "Partner surveys are waiting on provider setup."
+        }
+    }
+
+    private func requestStartPartnerSurvey(_ offer: PartnerSurveyOffer) {
+        guard !startingPartnerSurveyIDs.contains(offer.id) else {
+            return
+        }
+
+        pendingPartnerSurvey = offer
+        isConfirmingPartnerSurvey = true
+    }
+
+    private func startPartnerSurvey(_ offer: PartnerSurveyOffer) {
+        guard !startingPartnerSurveyIDs.contains(offer.id) else {
+            return
+        }
+
+        pendingPartnerSurvey = nil
+        startingPartnerSurveyIDs.insert(offer.id)
+
+        Task {
+            do {
+                let session = try await performAuthenticatedRequest { backend in
+                    try await backend.startPartnerSurvey(offerID: offer.id)
+                }
+                guard let entryURL = URL.supportedOfferURL(from: session.entryURL) else {
+                    throw PulsePerksAPIError.invalidURL
+                }
+
+                if let mappedSession = PartnerSurveySession(response: session) {
+                    partnerSurveySessions.removeAll { $0.id == mappedSession.id }
+                    partnerSurveySessions.insert(mappedSession, at: 0)
+                }
+
+                openURL(entryURL)
+                partnerSurveyState = .connected
+                partnerSurveyStatusMessage = "Partner survey started."
+            } catch {
+                partnerSurveyState = .failed
+                partnerSurveyStatusMessage = error.localizedDescription
+            }
+
+            startingPartnerSurveyIDs.remove(offer.id)
+        }
+    }
+
+    private var partnerSurveyConfirmationMessage: String {
+        guard let pendingPartnerSurvey else {
+            return "You are about to open a partner survey."
+        }
+
+        let host = pendingPartnerSurvey.entryURL.host() ?? pendingPartnerSurvey.provider.title
+        return "You are leaving RewardLoop for \(host). Points are awarded only after the partner confirms completion."
+    }
+
     private func refreshBootstrapIfStale() async {
         guard shouldRefreshBootstrapOnForeground else {
             return
         }
 
-        await loadBootstrap()
+        await refreshAppData()
     }
 
     private var shouldRefreshBootstrapOnForeground: Bool {
@@ -875,7 +1028,7 @@ struct ContentView: View {
 
     private func retryBootstrap() {
         Task {
-            await loadBootstrap()
+            await refreshAppData()
         }
     }
 
@@ -1315,7 +1468,7 @@ struct ContentView: View {
 
                 Spacer()
 
-                Text("+\(surveyPoints) pts earned")
+                Text("+\(totalSurveyPoints) pts earned")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -1327,14 +1480,14 @@ struct ContentView: View {
             ProgressView(value: dailySurveyGoalProgress)
                 .tint(Color(red: 0.1, green: 0.55, blue: 0.42))
 
-            Text("\(min(surveyPoints, dailySurveyGoal)) of \(dailySurveyGoal) daily survey points")
+            Text("\(min(totalSurveyPoints, dailySurveyGoal)) of \(dailySurveyGoal) daily survey points")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
                 StatBadge(value: "\(availableSurveys.count)", label: "Available")
                 StatBadge(value: "\(completedSurveys.count)", label: "Done")
-                StatBadge(value: "\(availableSurveys.reduce(0) { $0 + $1.points })", label: "Open pts")
+                StatBadge(value: "\(completedPartnerSurveyPoints)", label: "Partner pts")
             }
         }
         .padding(18)
@@ -1343,6 +1496,67 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(AppTheme.stroke(for: colorScheme))
         )
+    }
+
+    private var partnerSurveysSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Partner surveys", systemImage: partnerSurveyState.iconName)
+                    .font(.title2.weight(.bold))
+
+                Spacer()
+
+                if isLoadingPartnerSurveys {
+                    ProgressView()
+                } else {
+                    Text("+\(partnerSurveyPotentialPoints) pts")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if partnerSurveyOffers.isEmpty {
+                Text(partnerSurveyStatusMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(AppTheme.stroke(for: colorScheme))
+                    )
+
+                if partnerSurveyState.allowsRetry {
+                    Button {
+                        Task {
+                            await loadPartnerSurveyOffers()
+                        }
+                    } label: {
+                        Label("Check again", systemImage: "arrow.clockwise")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isLoadingPartnerSurveys)
+                }
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(partnerSurveyOffers) { offer in
+                        Button {
+                            requestStartPartnerSurvey(offer)
+                        } label: {
+                            PartnerSurveyOfferRow(
+                                offer: offer,
+                                isStarting: startingPartnerSurveyIDs.contains(offer.id)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(startingPartnerSurveyIDs.contains(offer.id))
+                    }
+                }
+            }
+        }
     }
 
     private func surveySection(title: String, surveys: [Survey], isCompleted: Bool) -> some View {
@@ -1410,12 +1624,13 @@ struct ContentView: View {
                     )
 
                     recentOfferClicks
+                    partnerSurveyActivity
                     recentActivity
                 }
                 .padding(20)
             }
             .refreshable {
-                await loadBootstrap()
+                await refreshAppData()
             }
             .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Wallet")
@@ -1501,6 +1716,32 @@ struct ContentView: View {
         }
     }
 
+    private var partnerSurveyActivity: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Partner survey activity")
+                .font(.title2.weight(.bold))
+
+            if partnerSurveySessions.isEmpty {
+                Text("Started partner surveys and confirmed completions will appear here.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(AppTheme.stroke(for: colorScheme))
+                    )
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(partnerSurveySessions.prefix(5)) { session in
+                        PartnerSurveySessionActivityRow(session: session)
+                    }
+                }
+            }
+        }
+    }
+
     private var accountTab: some View {
         NavigationStack {
             ScrollView {
@@ -1529,7 +1770,7 @@ struct ContentView: View {
 
                         AccountRetryRow(isLoading: isLoadingBootstrap) {
                             Task {
-                                await loadBootstrap()
+                                await refreshAppData()
                             }
                         }
                         AccountActionRow(iconName: "pencil", title: "Edit profile") {
@@ -1539,6 +1780,9 @@ struct ContentView: View {
                         AccountToggleRow(iconName: "location", title: "Nearby perks", isOn: nearbyPerksBinding)
                         AccountInfoActionRow(iconName: "megaphone", title: "Affiliate disclosure") {
                             isShowingAffiliateDisclosure = true
+                        }
+                        AccountInfoActionRow(iconName: "hand.raised", title: "Privacy & data") {
+                            isShowingPrivacyDisclosure = true
                         }
                         AccountInfoActionRow(iconName: "doc.on.doc", title: "Copy diagnostics") {
                             copyDiagnostics()
@@ -1564,7 +1808,7 @@ struct ContentView: View {
                 .padding(20)
             }
             .refreshable {
-                await loadBootstrap()
+                await refreshAppData()
             }
             .background(AppTheme.pageBackground(for: colorScheme))
             .navigationTitle("Account")
@@ -1692,6 +1936,53 @@ private enum BackendState {
             "checkmark.icloud"
         case .failed:
             "exclamationmark.icloud"
+        }
+    }
+}
+
+private enum PartnerSurveyConnectionState {
+    case loading
+    case connected
+    case empty
+    case unavailable
+    case failed
+
+    var title: String {
+        switch self {
+        case .loading:
+            "Loading"
+        case .connected:
+            "Connected"
+        case .empty:
+            "No inventory"
+        case .unavailable:
+            "Awaiting provider setup"
+        case .failed:
+            "Start failed"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .loading:
+            "arrow.triangle.2.circlepath"
+        case .connected:
+            "checkmark.seal"
+        case .empty:
+            "tray"
+        case .unavailable:
+            "hourglass"
+        case .failed:
+            "exclamationmark.triangle"
+        }
+    }
+
+    var allowsRetry: Bool {
+        switch self {
+        case .unavailable, .failed:
+            true
+        case .loading, .connected, .empty:
+            false
         }
     }
 }

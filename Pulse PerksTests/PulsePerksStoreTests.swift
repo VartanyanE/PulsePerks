@@ -343,6 +343,75 @@ struct PulsePerksStoreTests {
         #expect(defaults.data(forKey: "userBootstrap.\(userID)") == nil)
     }
 
+    @Test func partnerSurveyOfferMapsSupportedProviderSurvey() throws {
+        let response = testPartnerSurveyResponse(
+            rewardPoints: 120,
+            matchScore: 140,
+            entryURL: "https://spectrumsurveys.com/startSurvey?survey_id=123"
+        )
+
+        let offer = try #require(PartnerSurveyOffer(response: response))
+
+        #expect(offer.provider == .pureSpectrum)
+        #expect(offer.rewardPoints == 120)
+        #expect(offer.matchScore == 99)
+        #expect(offer.entryURL.host() == "spectrumsurveys.com")
+    }
+
+    @Test func partnerSurveyOfferRejectsUnsupportedEntryURLAndClampsPoints() {
+        let invalidURLResponse = testPartnerSurveyResponse(
+            rewardPoints: -50,
+            matchScore: -10,
+            entryURL: "pulseperks://survey/123"
+        )
+        let validURLResponse = testPartnerSurveyResponse(
+            rewardPoints: -50,
+            matchScore: -10,
+            entryURL: "https://spectrumsurveys.com/startSurvey?survey_id=123"
+        )
+        let offer = PartnerSurveyOffer(response: validURLResponse)
+
+        #expect(PartnerSurveyOffer(response: invalidURLResponse) == nil)
+        #expect(offer?.rewardPoints == 0)
+        #expect(offer?.matchScore == 0)
+    }
+
+    @Test func partnerSurveySessionMapsCompletedSessionAndRejectsUnsupportedEntryURL() throws {
+        let completedResponse = testPartnerSurveySessionResponse(
+            status: .completed,
+            rewardPoints: 180,
+            entryURL: "https://spectrumsurveys.com/startSurvey?survey_id=123",
+            completedAt: "2026-08-24T19:10:00Z"
+        )
+        let invalidURLResponse = testPartnerSurveySessionResponse(
+            status: .completed,
+            rewardPoints: 180,
+            entryURL: "rewardloop://partner-surveys/complete",
+            completedAt: "2026-08-24T19:10:00Z"
+        )
+
+        let session = try #require(PartnerSurveySession(response: completedResponse))
+
+        #expect(session.status == .completed)
+        #expect(session.awardsPoints)
+        #expect(session.rewardPoints == 180)
+        #expect(session.completedAt != nil)
+        #expect(PartnerSurveySession(response: invalidURLResponse) == nil)
+    }
+
+    @Test func partnerSurveySessionDoesNotAwardPointsUntilComplete() throws {
+        let response = testPartnerSurveySessionResponse(
+            status: .started,
+            rewardPoints: 180,
+            entryURL: "https://spectrumsurveys.com/startSurvey?survey_id=123",
+            completedAt: nil
+        )
+
+        let session = try #require(PartnerSurveySession(response: response))
+
+        #expect(!session.awardsPoints)
+    }
+
     private func testPerk(
         id: String,
         title: String,
@@ -368,6 +437,44 @@ struct PulsePerksStoreTests {
             offerKind: .affiliate,
             iconName: "tag",
             tint: .green
+        )
+    }
+
+    private func testPartnerSurveyResponse(
+        rewardPoints: Int,
+        matchScore: Int,
+        entryURL: String
+    ) -> PartnerSurveyOfferResponse {
+        PartnerSurveyOfferResponse(
+            id: "pure-spectrum-123",
+            provider: .pureSpectrum,
+            providerSurveyID: "123",
+            title: "Partner survey",
+            description: "Answer a partner survey.",
+            estimatedTime: "8 min",
+            rewardPoints: rewardPoints,
+            category: "Shopping",
+            matchScore: matchScore,
+            entryURL: entryURL,
+            disclosure: "Points are awarded after completion."
+        )
+    }
+
+    private func testPartnerSurveySessionResponse(
+        status: PartnerSurveySessionStatus,
+        rewardPoints: Int,
+        entryURL: String,
+        completedAt: String?
+    ) -> PartnerSurveySessionResponse {
+        PartnerSurveySessionResponse(
+            id: "session-123",
+            offerID: "pure-spectrum-123",
+            provider: .pureSpectrum,
+            status: status,
+            rewardPoints: rewardPoints,
+            entryURL: entryURL,
+            startedAt: "2026-08-24T19:00:00Z",
+            completedAt: completedAt
         )
     }
 }

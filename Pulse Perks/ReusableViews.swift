@@ -566,6 +566,154 @@ struct SurveyCompletionView: View {
     }
 }
 
+struct PartnerSurveyOfferRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let offer: PartnerSurveyOffer
+    let isStarting: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "globe.badge.chevron.backward")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 44, height: 44)
+                .background(AppTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    Text(offer.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Text("+\(offer.rewardPoints) pts")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(AppTheme.accent)
+                }
+
+                Text(offer.description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        partnerSurveyMetaLabel(offer.provider.title, systemImage: "building.2")
+                        partnerSurveyMetaLabel(offer.estimatedTime, systemImage: "clock")
+                        partnerSurveyMetaLabel("\(offer.matchScore)% match", systemImage: "scope")
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        partnerSurveyMetaLabel(offer.provider.title, systemImage: "building.2")
+                        partnerSurveyMetaLabel(offer.estimatedTime, systemImage: "clock")
+                        partnerSurveyMetaLabel("\(offer.matchScore)% match", systemImage: "scope")
+                    }
+                }
+
+                HStack {
+                    Label(offer.category, systemImage: "tag")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    if isStarting {
+                        ProgressView()
+                    } else {
+                        Label("Start", systemImage: "arrow.up.forward.app")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.accent)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+
+    private func partnerSurveyMetaLabel(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.88)
+    }
+}
+
+struct PartnerSurveySessionActivityRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let session: PartnerSurveySession
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: session.status.iconName)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(statusColor)
+                .frame(width: 44, height: 44)
+                .background(statusColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(session.provider.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+
+                    Spacer()
+
+                    Text(pointsText)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(statusColor)
+                }
+
+                Text(session.status.title)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                if let activityDate {
+                    Text(activityDate.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(14)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+
+    private var pointsText: String {
+        session.awardsPoints ? "+\(session.rewardPoints) pts" : "Pending"
+    }
+
+    private var activityDate: Date? {
+        session.completedAt ?? session.startedAt
+    }
+
+    private var statusColor: Color {
+        switch session.status {
+        case .completed:
+            AppTheme.accent
+        case .started:
+            Color(red: 0.15, green: 0.38, blue: 0.73)
+        case .screenedOut, .quotaFull:
+            Color(red: 0.58, green: 0.45, blue: 0.18)
+        case .failed:
+            Color(red: 0.75, green: 0.22, blue: 0.18)
+        }
+    }
+}
+
 struct PerkRow: View {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -1265,6 +1413,93 @@ struct AffiliateDisclosureView: View {
                 .font(.largeTitle.weight(.bold))
 
             Text("RewardLoop connects members with partner offers. This page explains how those links may support the app.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(
+            LinearGradient(
+                colors: [
+                    AppTheme.heroStart(for: colorScheme),
+                    AppTheme.heroEnd(for: colorScheme)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(AppTheme.stroke(for: colorScheme))
+        )
+    }
+}
+
+struct PrivacyDisclosureView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+
+                    DisclosureInfoCard(
+                        iconName: "person.text.rectangle",
+                        title: "Account data",
+                        message: "RewardLoop uses your email, display name, membership profile, selected interests, saved perks, redeemed perks, and completed surveys to personalize rewards and keep your wallet in sync."
+                    )
+
+                    DisclosureInfoCard(
+                        iconName: "link",
+                        title: "Offer activity",
+                        message: "When you open a partner offer, RewardLoop records the perk and destination URL for partner reporting. A shorter recent-offer history is also saved on this device for convenience."
+                    )
+
+                    DisclosureInfoCard(
+                        iconName: "list.clipboard",
+                        title: "Survey responses",
+                        message: "Survey answers are submitted to the backend so RewardLoop can award points, avoid duplicate submissions, and understand member preferences."
+                    )
+
+                    DisclosureInfoCard(
+                        iconName: "externaldrive",
+                        title: "Local data",
+                        message: "RewardLoop stores recent activity and cached app data on this device so the app can keep working during poor connectivity. Signing out clears user-scoped local cache."
+                    )
+
+                    DisclosureInfoCard(
+                        iconName: "doc.on.clipboard",
+                        title: "Diagnostics",
+                        message: "Copied diagnostics include sync status and counts that help troubleshoot issues. They do not include access tokens, API keys, anon keys, or raw user IDs."
+                    )
+                }
+                .padding(20)
+            }
+            .background(AppTheme.pageBackground(for: colorScheme))
+            .navigationTitle("Privacy")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: "hand.raised.fill")
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(AppTheme.accent)
+
+            Text("Privacy & data")
+                .font(.largeTitle.weight(.bold))
+
+            Text("RewardLoop uses account, reward, survey, and partner-offer activity to run the member experience.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
