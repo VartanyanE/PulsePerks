@@ -232,6 +232,14 @@ struct RewardLoopStoreTests {
         #expect(authenticatedConfiguration.authorizationToken == "session-token")
     }
 
+    @Test func supabaseConfigurationRejectsPlaceholderSecrets() {
+        #expect(!SupabaseConfiguration.isConfiguredSecret("", placeholder: "YOUR_SUPABASE_URL"))
+        #expect(!SupabaseConfiguration.isConfiguredSecret("YOUR_SUPABASE_URL", placeholder: "YOUR_SUPABASE_URL"))
+        #expect(!SupabaseConfiguration.isConfiguredSecret("$(SUPABASE_URL)", placeholder: "YOUR_SUPABASE_URL"))
+        #expect(!SupabaseConfiguration.isConfiguredSecret("YOUR_SUPABASE_ANON_KEY", placeholder: "YOUR_SUPABASE_ANON_KEY"))
+        #expect(SupabaseConfiguration.isConfiguredSecret("https://example.supabase.co", placeholder: "YOUR_SUPABASE_URL"))
+    }
+
     @Test func apiErrorIdentifiesAuthenticationFailures() {
         let unauthorizedError = RewardLoopAPIError.requestFailed(statusCode: 401, data: Data())
         let forbiddenError = RewardLoopAPIError.requestFailed(statusCode: 403, data: Data())

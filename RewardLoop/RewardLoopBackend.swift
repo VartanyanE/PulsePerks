@@ -709,16 +709,14 @@ struct SupabaseConfiguration: Equatable, Sendable {
     static var current: SupabaseConfiguration? {
         guard let urlValue = Bundle.main.object(forInfoDictionaryKey: "SUPABASE_URL") as? String,
               let anonKey = Bundle.main.object(forInfoDictionaryKey: "SUPABASE_ANON_KEY") as? String,
-              !urlValue.isEmpty,
-              !anonKey.isEmpty,
-              !urlValue.contains("YOUR_SUPABASE_URL"),
-              !anonKey.contains("YOUR_SUPABASE_ANON_KEY"),
+              isConfiguredSecret(urlValue, placeholder: "YOUR_SUPABASE_URL"),
+              isConfiguredSecret(anonKey, placeholder: "YOUR_SUPABASE_ANON_KEY"),
               let url = URL(string: urlValue) else {
             return nil
         }
 
         let memberID = (Bundle.main.object(forInfoDictionaryKey: "SUPABASE_MEMBER_ID") as? String)
-            .flatMap { $0.isEmpty ? nil : $0 } ?? MemberProfile.demo.id
+            .flatMap { isConfiguredSecret($0, placeholder: "YOUR_SUPABASE_MEMBER_ID") ? $0 : nil } ?? MemberProfile.demo.id
 
         return SupabaseConfiguration(
             projectURL: url,
@@ -730,36 +728,8 @@ struct SupabaseConfiguration: Equatable, Sendable {
     }
 
     static var bundled: SupabaseConfiguration? {
-        if let infoPlistConfiguration = current {
-            return infoPlistConfiguration
-        }
-
-        #if DEBUG
-        return debugSecretsConfiguration
-        #else
-        return nil
-        #endif
+        current
     }
-
-    #if DEBUG
-    private static var debugSecretsConfiguration: SupabaseConfiguration? {
-        guard !SupabaseSecrets.projectURL.isEmpty,
-              !SupabaseSecrets.anonKey.isEmpty,
-              !SupabaseSecrets.projectURL.contains("YOUR_SUPABASE_URL"),
-              !SupabaseSecrets.anonKey.contains("YOUR_SUPABASE_ANON_KEY"),
-              let url = URL(string: SupabaseSecrets.projectURL) else {
-            return nil
-        }
-
-        return SupabaseConfiguration(
-            projectURL: url,
-            anonKey: SupabaseSecrets.anonKey,
-            memberID: SupabaseSecrets.memberID.isEmpty ? MemberProfile.demo.id : SupabaseSecrets.memberID,
-            accessToken: nil,
-            memberName: "Emanuil"
-        )
-    }
-    #endif
 
     func authenticated(with session: AuthSession) -> SupabaseConfiguration {
         SupabaseConfiguration(
@@ -773,6 +743,19 @@ struct SupabaseConfiguration: Equatable, Sendable {
 
     var authorizationToken: String {
         accessToken ?? anonKey
+    }
+
+    static func isConfiguredSecret(_ value: String, placeholder: String) -> Bool {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedValue.isEmpty,
+              trimmedValue != placeholder,
+              !trimmedValue.contains("YOUR_SUPABASE_"),
+              !trimmedValue.contains("$(") else {
+            return false
+        }
+
+        return true
     }
 }
 
